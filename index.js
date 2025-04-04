@@ -89,23 +89,6 @@ app.get('/', async (req, res) => {
 
 });
 
-app.post('/your-endpoint', async (req, res) => {
-    try {
-        // ...existing code...
-        if (someCondition) {
-            res.status(200).send({ message: 'Success' });
-            return; // Ensure no further code runs after sending the response
-        }
-
-        res.status(400).send({ error: 'Bad Request' });
-    } catch (error) {
-        console.error(error);
-        if (!res.headersSent) { // Check if headers are already sent
-            res.status(500).send({ error: 'Internal Server Error' });
-        }
-    }
-});
-
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
