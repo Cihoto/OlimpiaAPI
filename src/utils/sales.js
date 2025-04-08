@@ -24,6 +24,10 @@ const getAllPaymentsConditions = async (apiKey) => {
         }
     }
 
+    const response = await fetch(paymentsConditionsURL, options);
+    const paymentsConditions = await response.json();
+    return paymentsConditions;
+
 }
 
 
@@ -231,6 +235,7 @@ const businessCenters = async (apiKey) => {
 
 
     const {centrosNegocios} = businessCentersData;
+    
 
     const expectedBusinessCenter = centrosNegocios.find(desc => desc.code === "EMP000000000000")
     ?.descendientes.find((desc) => {

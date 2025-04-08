@@ -197,7 +197,7 @@ class Bill {
     #checkpaymentCondition() {
         try {
             const paymentCodes = [
-                { code:"ANTICIPADO", name: ["ANTICIPADO","1"], paymentDays: 30 },
+                { code:"ANTICIPADO", name: ["ANTICIPADO","0"], paymentDays: 30 },
                 { code:"CONTADO", name: ["CONTADO","1"], paymentDays: 30 },
                 { code:"CREDITO120", name: ["CREDITO120","120"], paymentDays: 120 },
                 { code:"CREDITO15", name: ["CREDITO15","15"], paymentDays: 15 },

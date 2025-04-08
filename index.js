@@ -6,6 +6,7 @@ import { getAllCoinsId,getAllPaymentsConditions,getShops, getPriceList,getPriceL
   getClientByFileId,sellersId,getProds,getStorages, businessAnalysis,paymentConditions,businessCenters,classifierAnalysis
 } from './src/utils/sales.js';
 import billsRoutes from './src/routes/bills.js';
+import helpersRoutes from './src/routes/helpers.js';
 import morgan from 'morgan';
 import Bill from './src/models/Bill.js';
 import cors from 'cors';
@@ -23,7 +24,7 @@ app.use(cors());
 app.use(authMiddleware);
 
 app.use('/api',billsRoutes);
-
+app.use('/helpers',helpersRoutes);
 // Routes
 app.get('/', async (req, res) => {
 
@@ -37,12 +38,15 @@ app.get('/', async (req, res) => {
   // const priceList = await getPriceList(req.apiKey)
   // const getPriceListDetail = await getPriceListDetails(req.apiKey)
   // const documentAnalysis = await getDocumentAnalysis(req.apiKey)
-  // const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
+  const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
   // const getClientFromId = await getClientByFileId(req.apiKey,"76.322.465-1")
   // const sellersIdd = await sellersId(req.apiKey) 
   // const getProdss = await getProds(req.apiKey)
   // const getStoragess = await getStorages(req.apiKey)
   // const businessAnalysiss = await businessAnalysis(req.apiKey);// api/Sale/GetDocumentAnalisys
+  
+  res.json({getClientss})
+  return 
   const businessCenter =  await businessCenters(req.apiKey) //preguntar por API //api/Accounting/GetBusinessCenterPlan
   const saleBusinessCenterAccounts = {
     defaultSale : "EMPNEGVTAVTA000",
@@ -88,6 +92,9 @@ app.get('/', async (req, res) => {
   res.send('Hello World, this is your api token ' + req.apiKey);
 
 });
+
+
+
 
 // Start server
 const PORT = process.env.PORT || 5000;
