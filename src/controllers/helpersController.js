@@ -21,6 +21,12 @@ async function readCSV(req, res) {
             .on('end', () => {
                 console.log(results);
 
+                results.forEach((item) => {
+                    // Normalize prices to numbers
+                    item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
+                    item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
+                })
+
                 if(results.length == 1) {
                     // If only one result is found, return it directly
                     res.status(200).json({
