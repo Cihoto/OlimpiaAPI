@@ -77,7 +77,10 @@ async function createBill(req, res) {
         bill.validate();
         const BILLJSON = await bill.toJSON();
         console.log(BILLJSON);
-        res.json(BILLJSON);
+        res.status(200).json({
+            success: true,
+            data: BILLJSON
+        });
         return
 
         // res.status(200).json(BILLJSON);
