@@ -688,6 +688,14 @@ class Bill {
     }
     #getBusinessCenterCode = (businessCenterName) => {
         try{
+
+            //CHECK IF businessCenterName IS a valid string
+            if (typeof businessCenterName !== 'string' || businessCenterName.trim() === '') {
+                return {
+                    success: false,
+                    message: "Invalid business center name"
+                };
+            }
             const saleAccounts_businessCenter = [
                 {
                     code: "EMPNEGVTAVTA000",
@@ -698,7 +706,7 @@ class Bill {
                     desc: ["CNP","CONCEPCION"],
                 }
             ];
-
+            businessCenterName = businessCenterName.trim().toUpperCase();
             const foundBusinessCenter = saleAccounts_businessCenter.find((desc) => {
                 return desc.desc.includes(businessCenterName);
             });
@@ -709,6 +717,7 @@ class Bill {
                 return {
                     success: false,
                     message: `Business center: ${businessCenterName} not found`
+                    
                 };
             }
 
