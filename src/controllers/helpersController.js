@@ -25,6 +25,7 @@ async function readCSV(req, res) {
                     // Normalize prices to numbers
                     item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
                     item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
+                    item['Precio Caja'] = Number(item['Precio Caja']);
                 })
 
                 if(results.length == 1) {
