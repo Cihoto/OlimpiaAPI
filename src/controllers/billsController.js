@@ -9,46 +9,48 @@ async function createBill(req, res) {
         return;
     }
     try {
-        const reqq = {
-            body: {
-                apiKey : "",
-                documentType: "FVAELECT",
-                firstFolio : 0,
-                lastFolio : 0,
-                clientFile : "76.322.465-1",
-                paymentCondition : "30",//
-                sellerFileId : "17511433-5",
-                businessCenter: "VNT", // VNT O CNP (VENTA O CONCEPCION)
-                shopId : "Local",
-                priceList : "1",
-                giro : "Mi giro comercial",
-                attachedDocuments : [
-                    {
-                        folio: 123,
-                        documentType: 801,
-                        date: moment().format("DD-MM-YYYY"),
-                    }
-                ],
-                storage : "BODEGACENTRAL",
-                details : [
-                    {
-                        code : "003",
-                        quantity : 1,
-                        price: 0  //mandar en 0 en para usar precio en lista
-                    },
-                    {
-                        code : "17798147780052",
-                        quantity : 1,
-                        price: 0 
-                    }
-                ],
-                ventaRecDesGlobal : [],
-                customFields: [],
-                gloss : "esta es la glosa del documento",
-                isTransferDocument : true
-            }
-        };
-        const {body} = reqq;
+        // const reqq = {
+        //     body: {
+        //         apiKey : "",
+        //         documentType: "FVAELECT",
+        //         firstFolio : 0,
+        //         lastFolio : 0,
+        //         clientFile : "76.322.465-1",
+        //         paymentCondition : "30",//
+        //         sellerFileId : "17511433-5",
+        //         businessCenter: "VNT", // VNT O CNP (VENTA O CONCEPCION)
+        //         shopId : "Local",
+        //         priceList : "1",
+        //         giro : "Mi giro comercial",
+        //         attachedDocuments : [
+        //             {
+        //                 folio: 123,
+        //                 documentType: 801,
+        //                 date: moment().format("DD-MM-YYYY"),
+        //             }
+        //         ],
+        //         storage : "BODEGACENTRAL",
+        //         details : [
+        //             {
+        //                 code : "003",
+        //                 quantity : 1,
+        //                 price: 0  //mandar en 0 en para usar precio en lista
+        //             },
+        //             {
+        //                 code : "17798147780052",
+        //                 quantity : 1,
+        //                 price: 0 
+        //             }
+        //         ],
+        //         ventaRecDesGlobal : [],
+        //         customFields: [],
+        //         gloss : "esta es la glosa del documento",
+        //         isTransferDocument : true
+        //     }
+        // };
+        // const {body} = reqq;
+
+        const {body} = req;
         const bill = new Bill();
         bill.apiKey = req.apiKey
         bill.documentType = body.documentType;
@@ -124,7 +126,10 @@ async function createBill(req, res) {
     } catch (error) {
         console.error('Error creating bill:', error);
         if (error.code && error.message) {
-            res.status(error.code).json(error);
+            res.status(error.code).json({	
+                ...error,
+                success:false
+            });
         } else {
             res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error' });
         }

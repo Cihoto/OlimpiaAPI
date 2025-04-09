@@ -686,23 +686,24 @@ class Bill {
             };
         }       
     }
-
     #getBusinessCenterCode = (businessCenterName) => {
         try{
             const saleAccounts_businessCenter = [
                 {
                     code: "EMPNEGVTAVTA000",
-                    desc: "VNT",
+                    desc: ["VNT","VENTA","VENTAS"],
                 },
                 {
                     code: "EMPNEGVTACCP000",
-                    desc: "CNP",
+                    desc: ["CNP","CONCEPCION"],
                 }
             ];
 
             const foundBusinessCenter = saleAccounts_businessCenter.find((desc) => {
-                return desc.desc === businessCenterName;
+                return desc.desc.includes(businessCenterName);
             });
+
+            console.log("asldkjalsdkjaldksjalksdjlaksjdlakjsd",{foundBusinessCenter});
 
             if (!foundBusinessCenter) {
                 return {
@@ -716,6 +717,7 @@ class Bill {
                 success: true
             }
         }catch(error){
+            console.log(error)
             return {
                 success: false,
                 message: `Failed to fetch business center code using ${businessCenterName}`
@@ -734,7 +736,7 @@ class Bill {
             //validar elementos del array proporcionado son correctos
             const invalidDetail = details.find(detail => {
                 return !detail.code || typeof detail.code !== "string" || 
-                       !detail.quantity || !Number.isInteger(detail.quantity);
+                       detail.quantity === undefined || !Number.isFinite(detail.quantity) ;
             });
             if (invalidDetail) {
                 return {
@@ -755,6 +757,10 @@ class Bill {
             const productCodes = productList.map(product => product.code);
             let detailList = [];
             details.forEach((detail) => {
+
+                if(detail.quantity <= 0 ){
+                    return;
+                }
 
                 const productInfo = productList.find(product => product.code === detail.code);
                 if (!productInfo) {

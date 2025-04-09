@@ -3,6 +3,6 @@ import { createBill } from '../controllers/billsController.js';
 const router = Router();
 
 // Define routes
-router.get('/issueNewBill', createBill);
+router.post('/issueNewBill', createBill);
 
 export default router;
