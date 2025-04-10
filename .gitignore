@@ -1,2 +1,6 @@
 *.env
 /node_modules
+/src/routes/google.js
+/src/routes/google.js
+/src/middleware/Credentials
+/src/middleware/googleAuth.js
