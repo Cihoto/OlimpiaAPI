@@ -1,7 +1,7 @@
 import fs from 'fs';
 import csvParser from 'csv-parser';
 
-const CSV = './src/documents/olimpia_clients.csv'; // Use the file path as a string
+const CSV = './src/documents/CLIENTES_OLIMPIA.csv'; // Use the file path as a string
 
 async function readCSV(req, res) {
     const results = [];
