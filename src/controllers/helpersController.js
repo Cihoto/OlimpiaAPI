@@ -1,5 +1,10 @@
 import fs from 'fs';
 import csvParser from 'csv-parser';
+import OpenAI  from 'openai';
+
+const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 
 const CSV = './src/documents/CLIENTES_OLIMPIA.csv'; // Use the file path as a string
 
@@ -18,8 +23,10 @@ async function readCSV(req, res) {
 
                 } // Collect all rows
             })
-            .on('end', () => {
-                console.log(results);
+            .on('end', async () => {
+                // console.log(results);
+
+                console.log("***********************************************")
 
                 results.forEach((item) => {
                     // Normalize prices to numbers
@@ -27,7 +34,6 @@ async function readCSV(req, res) {
                     item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
                     item['Precio Caja'] = Number(item['Precio Caja']);
                 })
-                
 
                 if(results.length == 0) {
                     res.status(200).json({
@@ -48,24 +54,63 @@ async function readCSV(req, res) {
                     return;
                 }
 
-                if(results.length > 1 && address) {
+                if(!address) {
+                    // If no address is provided, return all results but address as false
                     res.status(200).json({
-                        data: JSON.stringify(results),
+                        data: results,
                         length: results.length,
-                        address: true
-                    });
-                    return;
-                }
-
-                if(results.length > 1 && !address) {
-                    // If multiple results are found and no address is provided, return all results
-                    res.status(200).json({
                         address: false
                     });
                     return;
                 }
 
-                res.status(200).json(results); // Return all data
+                //map results array for Gpt token limitation
+                const clientData = results.map ((item,index) => {
+                    return {
+                        index: index,
+                        direccion: item['Dirección Despacho'],
+                    }
+                });
+                const gptResponse = await  integrateWithChatGPT(clientData, address); // Integrate with ChatGPT
+                // res.json(gptResponse); // Return the GPT response
+                // return
+                console.log("________GPT RESPONSE_____________");
+                console.log(gptResponse);
+                console.log(gptResponse.length);
+                console.log("_____________________");
+                if(gptResponse.length == 0 ) {
+                    res.status(200).json({
+                        data:gptResponse,
+                        length: gptResponse.length,
+                        address: address ? true : false,
+                    })
+                    return;
+                }
+                
+                const matched = gptResponse.find((item) => item.match === true);
+                const found = results.find((result,index) => {
+                    return index == (matched.index)
+                });
+
+                if(!found) {
+                    console.log("no se encontro nada")
+                    res.status(200).json({
+                        data: found,
+                        length: [found].length,
+                        address: address ? true : false,
+                        message: "No se encontro nada"
+                    })
+                    return;
+                }
+                // If a match is found, return the matched address
+
+                res.status(200).json({
+                    data: found,
+                    length: [found].length,
+                    address: true,
+                    message: "Se encontro una coincidencia",
+                });
+                return;
             });
     } catch (error) {
         res.status(500).json({ error: 'Error reading the CSV file' });
@@ -139,6 +184,36 @@ function calculateSimilarity(str1, str2) {
     const commonLength = [...str1].filter((char, index) => str2[index] === char).length;
     return commonLength / Math.max(str1.length, str2.length);
 }
+
+//integracion con chat gpt
+
+
+
+async function integrateWithChatGPT(addresses, targetAddress) {
+
+    const prompt = `Busca dentro de este arreglo ${JSON.stringify(addresses)} la mejor coincidencia para la dirección "${targetAddress}".
+    En caso de encontrar una coincidencia, devolver un array JSON con el objeto que contenga la dirección agregando "match": true.
+    En caso de no encontrar coincidencias, devolver un array vacio. En caso de tener coincidencias, devolver solo un elemento.
+    [no prose] [Output only JSON]`;
+
+    const response = await client.responses.create({
+        model: "gpt-4o-mini",
+        input: prompt
+    });
+
+    try {
+        const sanitizedOutput = response.output_text.trim().replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
+        const validJson = JSON.parse(sanitizedOutput);
+        return validJson; // Return the parsed JSON as an array
+    } catch (error) {
+        console.error('Error parsing JSON from GPT response:', error);
+        return []; // Return an empty array in case of error
+    }
+}
+
+
+
+
 
 
 
