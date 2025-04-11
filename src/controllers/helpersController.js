@@ -72,12 +72,7 @@ async function readCSV(req, res) {
                     }
                 });
                 const gptResponse = await  integrateWithChatGPT(clientData, address); // Integrate with ChatGPT
-                // res.json(gptResponse); // Return the GPT response
-                // return
-                console.log("________GPT RESPONSE_____________");
-                console.log(gptResponse);
-                console.log(gptResponse.length);
-                console.log("_____________________");
+
                 if(gptResponse.length == 0 ) {
                     res.status(200).json({
                         data:gptResponse,
