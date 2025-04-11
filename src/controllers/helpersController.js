@@ -28,6 +28,14 @@ async function readCSV(req, res) {
                     item['Precio Caja'] = Number(item['Precio Caja']);
                 })
 
+                if(results.length == 0) {
+                    res.status(400).json({
+                        data:[],
+                        length: results.length,
+                        address: address ? true : false,
+                    })
+                }
+
                 if(results.length == 1) {
                     // If only one result is found, return it directly
                     res.status(200).json({
