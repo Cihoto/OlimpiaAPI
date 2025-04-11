@@ -29,7 +29,7 @@ async function readCSV(req, res) {
                 })
 
                 if(results.length == 0) {
-                    res.status(400).json({
+                    res.status(200).json({
                         data:[],
                         length: results.length,
                         address: address ? true : false,
