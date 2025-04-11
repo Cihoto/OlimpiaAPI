@@ -27,6 +27,7 @@ async function readCSV(req, res) {
                     item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
                     item['Precio Caja'] = Number(item['Precio Caja']);
                 })
+                
 
                 if(results.length == 0) {
                     res.status(200).json({
@@ -34,6 +35,7 @@ async function readCSV(req, res) {
                         length: results.length,
                         address: address ? true : false,
                     })
+                    return;
                 }
 
                 if(results.length == 1) {
@@ -52,6 +54,7 @@ async function readCSV(req, res) {
                         length: results.length,
                         address: true
                     });
+                    return;
                 }
 
                 if(results.length > 1 && !address) {
@@ -59,6 +62,7 @@ async function readCSV(req, res) {
                     res.status(200).json({
                         address: false
                     });
+                    return;
                 }
 
                 res.status(200).json(results); // Return all data
