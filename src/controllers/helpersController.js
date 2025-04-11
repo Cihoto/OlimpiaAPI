@@ -2,9 +2,7 @@ import fs from 'fs';
 import csvParser from 'csv-parser';
 import OpenAI  from 'openai';
 
-const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const client = new OpenAI();
 
 const CSV = './src/documents/CLIENTES_OLIMPIA.csv'; // Use the file path as a string
 
