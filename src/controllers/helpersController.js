@@ -115,10 +115,23 @@ async function readCSV(req, res) {
 
 async function readEmailBody(req, res) {
     const { emailBody, emailSubject } = req.query;
+    console.log("emailBody", emailBody);
+    console.log("emailSubject", emailSubject);
+    // Sanitize emailBody and emailSubject to remove control characters and unnecessary content
+    const sanitizedEmailBody = emailBody
+        .replace(/---------- Forwarded message ---------/g, '') // Remove forwarded message header
+        .replace(/De:.*\n/g, '') // Remove sender information
+        .replace(/Date:.*\n/g, '') // Remove date information
+        .replace(/Subject:.*\n/g, '') // Remove subject information
+        .replace(/To:.*\n/g, '') // Remove recipient information
+        .replace(/-- .*/g, '') // Remove signature separator
+        .replace(/[\r\n]+/g, ' ') // Replace newlines with spaces
+        .trim();
 
-    // Sanitize emailBody and emailSubject to remove control characters
-    const sanitizedEmailBody = emailBody.replace(/[\r\n]+/g, ' ').trim();
-    const sanitizedEmailSubject = emailSubject.replace(/[\r\n]+/g, ' ').trim();
+    const sanitizedEmailSubject = emailSubject
+        .replace(/Fwd: /g, '') // Remove "Fwd:" prefix
+        .replace(/[\r\n]+/g, ' ') // Replace newlines with spaces
+        .trim();
 
     const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
     La respuesta debe comenzar directamente con [ y terminar con ].
@@ -141,8 +154,8 @@ async function readEmailBody(req, res) {
     Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0.
     Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0.
     Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
-    Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe, devuelve 0.
-    Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe, devuelve 0.
+    Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
+    Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
     Monto neto: También llamado subtotal. Si es que existe.
     Iva: monto del impuesto. Si es que existe.
     Total: Monto total del pedido, impuestos incluidos. Si es que existe.
