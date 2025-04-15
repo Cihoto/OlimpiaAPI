@@ -1,6 +1,7 @@
 import fs from 'fs';
 import csvParser from 'csv-parser';
 import OpenAI from 'openai';
+import moment from 'moment';
 
 const client = new OpenAI();
 
@@ -185,7 +186,7 @@ async function readEmailBody(req, res) {
         }
 
         // console.log("valido", validJson.Rut);
-        if(!validJson.Rut) {
+        if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
             return res.status(400).json({ success:false , error: 'No se encuentra RUT en el correo', data : validJson, executionDate : moment().format('DD-MM-YYYY') });
         }
         const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
