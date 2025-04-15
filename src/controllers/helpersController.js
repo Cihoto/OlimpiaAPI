@@ -114,9 +114,15 @@ async function readCSV(req, res) {
 }
 
 async function readEmailBody(req, res) {
-    const { emailBody, emailSubject } = req.query;
-    console.log("emailBody", emailBody);
-    console.log("emailSubject", emailSubject);
+    const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
+
+    const newBody = JSON.stringify(emailBody).replace(/\\n/g, ' ');
+    const newSubject = JSON.stringify(emailSubject).replace(/\\n/g, ' ');
+
+    console.log("newBody", newBody);
+
+    res.status(200).json({ newBody, newSubject });
+
     // Sanitize emailBody and emailSubject to remove control characters and unnecessary content
     const sanitizedEmailBody = emailBody
         .replace(/\r?\n|\r/g, ' ') // Replace all line breaks with spaces
