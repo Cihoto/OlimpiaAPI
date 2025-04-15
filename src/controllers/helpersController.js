@@ -118,42 +118,42 @@ async function readCSV(req, res) {
 
 
 async function readEmailBody(req, res) {
-    // const { emailBody, emailSubject, senderEmailAdress, rutToSearch, address } = req.query; // Get the RUT from the query parameters
-    // const { emailBody, emailSubject, senderEmailAdress, rutToSearch, address } = req.query; // Get the RUT from the query parameters
+    const { emailBody, emailSubject } = req.query; // Get the RUT from the query parameters
+    // const { emailBody, emailSubject } = req.query; // Get the RUT from the query parameters
     
 
-    const emailBody = `---------- Forwarded message ---------
-    De: Margelys Gonzalez <margelysgonzalez@getitchile.cl>
-    Date: lun, 27 ene 2025 a la(s) 1:49 p.m.
-    Subject: Pedido para convenience de chile
-    To: Pedidos Franui <pedidos@franui.cl>, Fuad Jamis <fuad@comercialolimpia.cl
-    >
+    // const emailBody = `---------- Forwarded message ---------
+    // De: Margelys Gonzalez <margelysgonzalez@getitchile.cl>
+    // Date: lun, 27 ene 2025 a la(s) 1:49 p.m.
+    // Subject: Pedido para convenience de chile
+    // To: Pedidos Franui <pedidos@franui.cl>, Fuad Jamis <fuad@comercialolimpia.cl
+    // >
 
 
-    Estimado,
-    Buenas tardes! envió pedido para convenience de Chile SPA
-    Rut: 76.865.177-9
-    Sucursal nueva de Lyon 135, providencia.
-    Saludos,
-    PRODUCTO PEDIDOS
-    FRANUI AMARGO 150G             1
-    FRANUI LECHE 150G              1
+    // Estimado,
+    // Buenas tardes! envió pedido para convenience de Chile SPA
+    // Rut: 76.865.177-9
+    // Sucursal nueva de Lyon 135, providencia.
+    // Saludos,
+    // PRODUCTO PEDIDOS
+    // FRANUI AMARGO 150G             1
+    // FRANUI LECHE 150G              1
 
-    -- 
+    // -- 
 
 
 
-    Margelys González
+    // Margelys González
 
-    Jefe de Sucursal
+    // Jefe de Sucursal
 
-    Nueva de Lyon 135, Providencia
+    // Nueva de Lyon 135, Providencia
 
-    ‪+56945194373‬
+    // ‪+56945194373‬
 
-    margelysgonzalez@getitchile.cl`
+    // margelysgonzalez@getitchile.cl`
 
-    const emailSubject = `Fwd: Pedido para convenience de chile`;
+    // const emailSubject = `Fwd: Pedido para convenience de chile`;
     
     const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
     La respuesta debe comenzar directamente con [ y terminar con ].
