@@ -113,60 +113,25 @@ async function readCSV(req, res) {
     }
 }
 
-
-
-
-
 async function readEmailBody(req, res) {
-    const { emailBody, emailSubject } = req.query; // Get the RUT from the query parameters
-    // const { emailBody, emailSubject } = req.query; // Get the RUT from the query parameters
-    
+    const { emailBody, emailSubject } = req.query;
 
-    // const emailBody = `---------- Forwarded message ---------
-    // De: Margelys Gonzalez <margelysgonzalez@getitchile.cl>
-    // Date: lun, 27 ene 2025 a la(s) 1:49 p.m.
-    // Subject: Pedido para convenience de chile
-    // To: Pedidos Franui <pedidos@franui.cl>, Fuad Jamis <fuad@comercialolimpia.cl
-    // >
+    // Sanitize emailBody and emailSubject to remove control characters
+    const sanitizedEmailBody = emailBody.replace(/[\r\n]+/g, ' ').trim();
+    const sanitizedEmailSubject = emailSubject.replace(/[\r\n]+/g, ' ').trim();
 
-
-    // Estimado,
-    // Buenas tardes! envió pedido para convenience de Chile SPA
-    // Rut: 76.865.177-9
-    // Sucursal nueva de Lyon 135, providencia.
-    // Saludos,
-    // PRODUCTO PEDIDOS
-    // FRANUI AMARGO 150G             1
-    // FRANUI LECHE 150G              1
-
-    // -- 
-
-
-
-    // Margelys González
-
-    // Jefe de Sucursal
-
-    // Nueva de Lyon 135, Providencia
-
-    // ‪+56945194373‬
-
-    // margelysgonzalez@getitchile.cl`
-
-    // const emailSubject = `Fwd: Pedido para convenience de chile`;
-    
     const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
     La respuesta debe comenzar directamente con [ y terminar con ].
     No incluyas ningún texto antes o después del JSON.
     No uses formato Markdown. 
     No expliques lo que estás haciendo.
-    Tu respuesta debe ser solamente el JSON.Nada más.;`
+    Tu respuesta debe ser solamente el JSON. Nada más.;`;
 
     const userPrompt = `Eres un bot que analiza pedidos para franuí, empresa que comercializa frambuezas bañadas en chocolate. Franuí maneja solamente 3 productos, Frambuezas bañadas en:
     - Chocolate Amargo
     - Chocolate de Leche (tradicional)
     - Chocolate Pink
-    Debes analizar el texto del body del correo: "${emailBody}" y el asunto: "${emailSubject}", y deberás extraer los datos relevantes para guardarlos en variables. Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
+    Debes analizar el texto del body del correo: "${sanitizedEmailBody}" y el asunto: "${sanitizedEmailSubject}", y deberás extraer los datos relevantes para guardarlos en variables. Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
     Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
     Razon_social: Contiene la razón social del cliente.
     Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
@@ -182,11 +147,9 @@ async function readEmailBody(req, res) {
     Iva: monto del impuesto. Si es que existe.
     Total: Monto total del pedido, impuestos incluidos. Si es que existe.
     Sender_Email: Es el email de quien envía
-    URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.`; // Get the address from the query parameters
-    
-    
-    try {
+    URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.`;
 
+    try {
         const response = await client.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
@@ -195,37 +158,32 @@ async function readEmailBody(req, res) {
             ]
         });
 
-        const jsonResponse = response.choices[0].message.content.trim(); // Extract the JSON from the response
+        const jsonResponse = response.choices[0].message.content.trim();
         const sanitizedOutput = jsonResponse.replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
-        const validJson = JSON.parse(sanitizedOutput)[0]; // Parse the JSON string into an object
-        
-        console.log(validJson); // Log the parsed JSON object
+        const validJson = JSON.parse(sanitizedOutput)[0];
 
-        //check if Rut is on validJson
+        console.log(validJson);
+
         if (!validJson.Rut) {
-            console.log("invalido",validJson.Rut);
+            console.log("invalido", validJson.Rut);
         }
 
-        console.log("valido",validJson.Rut);
-        
+        console.log("valido", validJson.Rut);
 
-        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho); // Await the execution of readCSV_private
+        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
 
-        console.log("clientData",clientData);
-        console.log("clientData",clientData);
+        console.log("clientData", clientData);
         const merged = {
             ...validJson,
             ...clientData,
-        }
+        };
 
-        res.status(200).json({ 
-            merged
-        });
+        res.status(200).json({ merged });
         return;
 
     } catch (error) {
         console.log(error);
-        res.status(500).json({ error: 'Error reading the CSV file' ,message: error});
+        res.status(500).json({ error: 'Error processing the email body', message: error });
     }
 }
 
