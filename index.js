@@ -18,6 +18,8 @@ dotenv.config();
 
 // Middlewares
 app.use(bodyParser.json());
+// Middleware para procesar texto plano
+app.use(express.text());
 app.use(morgan('dev'));
 app.use(cors());
 

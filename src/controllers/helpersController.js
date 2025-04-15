@@ -115,34 +115,24 @@ async function readCSV(req, res) {
 
 
 
+
 async function readEmailBody(req, res) {
     // const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
-
-    const plainText = req.body; // Assuming the plain text is sent in the request body
-
-    const newBody = plainText.replaceAll(/\\n/g, ' ');
-
-    console.log("newBody", newBody);
-
-    res.status(200).json({ newBody });
-    return;
-
-    // Sanitize emailBody and emailSubject to remove control characters and unnecessary content
-    const sanitizedEmailBody = emailBody
-        .replace(/\r?\n|\r/g, ' ') // Replace all line breaks with spaces
-        .replace(/---------- Forwarded message ---------/g, '') // Remove forwarded message header
-        .replace(/De:.*\n/g, '') // Remove sender information
-        .replace(/Date:.*\n/g, '') // Remove date information
-        .replace(/Subject:.*\n/g, '') // Remove subject information
-        .replace(/To:.*\n/g, '') // Remove recipient information
-        .replace(/-- .*/g, '') // Remove signature separator
-        .replace(/[\r\n]+/g, ' ') // Replace newlines with spaces
+    // Assuming the plain text is sent in the request body
+    const plainText = req.body; // Fallback to req.body if plainText is not provided
+    console.log("hola",req.body)
+    console.log("Received plainText:", plainText);
+        
+    // Sanitize the email body
+    const sanitizedEmailBody = plainText
+        .replaceAll(/\s+/g, ' ') // Remove all white spaces
         .trim();
+    
+    const {emailBody, emailSubject} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
-    const sanitizedEmailSubject = emailSubject
-        .replace(/Fwd: /g, '') // Remove "Fwd:" prefix
-        .replace(/[\r\n]+/g, ' ') // Replace newlines with spaces
-        .trim();
+    if(!emailBody || !emailSubject) {
+        return res.status(400).json({ error: 'Invalid request body' });
+    }
 
     const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
     La respuesta debe comenzar directamente con [ y terminar con ].
@@ -155,7 +145,7 @@ async function readEmailBody(req, res) {
     - Chocolate Amargo
     - Chocolate de Leche (tradicional)
     - Chocolate Pink
-    Debes analizar el texto del body del correo: "${sanitizedEmailBody}" y el asunto: "${sanitizedEmailSubject}", y deberás extraer los datos relevantes para guardarlos en variables. Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
+    Debes analizar el texto del body del correo: "${emailBody}" y el asunto: "${emailSubject}", y deberás extraer los datos relevantes para guardarlos en variables. Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
     Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
     Razon_social: Contiene la razón social del cliente.
     Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
@@ -192,14 +182,16 @@ async function readEmailBody(req, res) {
             console.log("invalido", validJson.Rut);
         }
 
-        console.log("valido", validJson.Rut);
-
+        // console.log("valido", validJson.Rut);
+        if(!validJson.Rut) {
+            return res.status(400).json({ success:false , error: 'Invalid RUT' });
+        }
         const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
 
         console.log("clientData", clientData);
         const merged = {
-            ...validJson,
-            ...clientData,
+            "EmailData": { ...validJson },
+            "ClientData": { ...clientData },
         };
 
         res.status(200).json({ merged });
@@ -211,32 +203,7 @@ async function readEmailBody(req, res) {
     }
 }
 
-async function readCSV_not(req, res) {
-    const results = [];
-    // const {rutToSearch} = req.query; // Get the RUT from the query parameters
-    const rutToSearch = "76.865.177-9"; // Get the RUT from the query parameters
-    const address = "kennedy 5753 local 02"; // Get the address from the query parameters
-    const normalizedRut = normalizeRut(rutToSearch); // Normalize the RUT
-    console.log(`RUT to search: ${normalizedRut}`); // Log the RUT to search
-    try {
-        fs.createReadStream(CSV)
-            .pipe(csvParser())
-            .on('data', (data) => {
-                if (data.RUT == normalizedRut) {
-                    results.push(data);
 
-                } // Collect all rows
-            })
-            .on('end', () => {
-                console.log(results);
-
-                const findByAddress = searchByAddress(results, address); // Search by address
-                res.status(200).json(results); // Return all data
-            });
-    } catch (error) {
-        res.status(500).json({ error: 'Error reading the CSV file' });
-    }
-}
 
 function normalizeRut(rut) {
     // Remove all non-numeric characters except 'k' or 'K' (used in Chilean RUTs)
