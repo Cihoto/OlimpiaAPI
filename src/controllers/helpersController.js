@@ -119,7 +119,7 @@ async function readEmailBody(req, res) {
     console.log("emailSubject", emailSubject);
     // Sanitize emailBody and emailSubject to remove control characters and unnecessary content
     const sanitizedEmailBody = emailBody
-        .replace(":",'')
+        .replace(/\r?\n|\r/g, ' ') // Replace all line breaks with spaces
         .replace(/---------- Forwarded message ---------/g, '') // Remove forwarded message header
         .replace(/De:.*\n/g, '') // Remove sender information
         .replace(/Date:.*\n/g, '') // Remove date information
