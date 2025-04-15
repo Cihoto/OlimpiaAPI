@@ -122,6 +122,7 @@ async function readEmailBody(req, res) {
     console.log("newBody", newBody);
 
     res.status(200).json({ newBody, newSubject });
+    return;
 
     // Sanitize emailBody and emailSubject to remove control characters and unnecessary content
     const sanitizedEmailBody = emailBody
