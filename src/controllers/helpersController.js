@@ -114,9 +114,6 @@ async function readCSV(req, res) {
     }
 }
 
-
-
-
 async function readEmailBody(req, res) {
     // const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
     // Assuming the plain text is sent in the request body
@@ -131,11 +128,17 @@ async function readEmailBody(req, res) {
     
     console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
 
-    const {emailBody, emailSubject} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
+    const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
-    if(!emailBody || !emailSubject) {
+    if(!emailBody || !emailSubject || !emailAttached) {
         return res.status(400).json({ error: 'Invalid request body'});
     }
+    let attachedPrompt = ""
+    let OC = ""
+    if(emailAttached !== ""){
+        attachedPrompt = `y el texto que hemos extraido desde un PDF adjunto que trae la orden de compra con el pedido: "${emailAttached}". `
+    }
+
 
     const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
     La respuesta debe comenzar directamente con [ y terminar con ].
@@ -148,7 +151,8 @@ async function readEmailBody(req, res) {
     - Chocolate Amargo
     - Chocolate de Leche (tradicional)
     - Chocolate Pink
-    Debes analizar el texto del body del correo: "${emailBody}" y el asunto: "${emailSubject}", y deberás extraer los datos relevantes para guardarlos en variables. Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
+    Debes analizar el texto del body del correo: "${emailBody}", el asunto: "${emailSubject}" ${attachedPrompt} , y deberás extraer los datos relevantes para guardarlos en variables. 
+    Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
     Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
     Razon_social: Contiene la razón social del cliente.
     Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
@@ -160,6 +164,7 @@ async function readEmailBody(req, res) {
     Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
     Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
     Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
+    Orden_de_Compra: es el número de orden de compra. Si no existe, devuelve "null".
     Monto neto: También llamado subtotal. Si es que existe.
     Iva: monto del impuesto. Si es que existe.
     Total: Monto total del pedido, impuestos incluidos. Si es que existe.
@@ -196,7 +201,7 @@ async function readEmailBody(req, res) {
                     validJson[key] === "undefined" ||
                     validJson[key] === ""
                 ) {
-                    validJson[key] = `No tiene [${validJson[key]}] [${key}]`;
+                    validJson[key] = `[${validJson[key]}] [${key}]`;
                 }
             });
             return res.status(400).json({ 
@@ -223,6 +228,7 @@ async function readEmailBody(req, res) {
         res.status(500).json({ error: 'Error processing the email body', message: error });
     }
 }
+
 
 
 
@@ -294,114 +300,6 @@ async function integrateWithChatGPT(addresses, targetAddress) {
     }
 }
 
-
-
-async function readCSV_privatee(rutToSearch, address) {
-    const results = [];
-    // const { rutToSearch, address } = req.query; // Get the RUT from the query parameters
-    console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
-    console.log(`address to search: ${address}`); // Log the address to search
-    const normalizedRut = normalizeRut(rutToSearch); // Normalize the RUT
-    console.log(`RUT to search: ${normalizedRut}`); // Log the RUT to search
-    try {
-        fs.createReadStream(CSV)
-            .pipe(csvParser())
-            .on('data', (data) => {
-                if (data.RUT == normalizedRut) {
-                    results.push(data);
-
-                } // Collect all rows
-            })
-            .on('end', async () => {
-                // console.log(results);
-
-                console.log("***********************************************")
-
-                results.forEach((item) => {
-                    // Normalize prices to numbers
-                    item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
-                    item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
-                    item['Precio Caja'] = Number(item['Precio Caja']);
-                })
-
-                
-
-                if (results.length == 0) {
-                    return{
-                        data: [],
-                        length: results.length,
-                        address: address ? true : false,
-                    }
-                }
-
-                if (results.length == 1) {
-                    // If only one result is found, return it directly
-                    return{
-                        data: results[0],
-                        length: results.length,
-                        address: true
-                    }
-                }
-
-                if (!address) {
-                    // If no address is provided, return all results but address as false
-                    const first = results[0];
-                    first['Dirección Despacho'] = "";
-                    return{
-                        data: first,
-                        length: results.length,
-                        address: false
-                    }
-                }
-                
-
-                //map results array for Gpt token limitation
-                const clientData = results.map((item, index) => {
-                    return {
-                        index: index,
-                        direccion: item['Dirección Despacho'],
-                    }
-                });
-                const gptResponse = await integrateWithChatGPT(clientData, address); // Integrate with ChatGPT
-                console.log(gptResponse)
-                if (gptResponse.length == 0) {
-
-                    return{
-                        data: gptResponse,
-                        length: gptResponse.length,
-                        address: address ? true : false,
-                    }
-                }
-
-                const matched = gptResponse.find((item) => item.match === true);
-                const found = results.find((result, index) => {
-                    return index == (matched.index)
-                });
-
-                if (!found) {
-                    console.log("no se encontro nada")
-                    return{
-                        data: found,
-                        length: [found].length,
-                        address: address ? true : false,
-                        message: "No se encontro nada"
-                    }
-                    
-                }
-                // If a match is found, return the matched address
-                console.log("final final")
-                return{
-                    data: found,
-                    length: [found].length,
-                    address: true,
-                    message: "Se encontro una coincidencia",
-                };
-            });
-    } catch (error) {
-        return{success: false, error: 'Error reading the CSV file' };
-    }
-}
-
 async function readCSV_private(rutToSearch, address) {
     const results = [];
     console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
@@ -419,7 +317,6 @@ async function readCSV_private(rutToSearch, address) {
                     } // Collect all rows
                 })
                 .on('end', async () => {
-                    console.log("***********************************************");
 
                     results.forEach((item) => {
                         // Normalize prices to numbers
@@ -492,7 +389,7 @@ async function readCSV_private(rutToSearch, address) {
                         });
                         return;
                     }
-
+                    
                     console.log("final final");
                     resolve({
                         data: found,
@@ -509,6 +406,8 @@ async function readCSV_private(rutToSearch, address) {
         }
     });
 }
+
+
 
 
 
