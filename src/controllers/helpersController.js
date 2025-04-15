@@ -128,10 +128,12 @@ async function readEmailBody(req, res) {
         .replaceAll(/\s+/g, ' ') // Remove all white spaces
         .trim();
     
+    console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
+
     const {emailBody, emailSubject} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
     if(!emailBody || !emailSubject) {
-        return res.status(400).json({ error: 'Invalid request body' });
+        return res.status(400).json({ error: 'Invalid request body'});
     }
 
     const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
@@ -184,7 +186,7 @@ async function readEmailBody(req, res) {
 
         // console.log("valido", validJson.Rut);
         if(!validJson.Rut) {
-            return res.status(400).json({ success:false , error: 'Invalid RUT' });
+            return res.status(400).json({ success:false , error: 'No se encuentra RUT en el correo', data : validJson });
         }
         const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
 
