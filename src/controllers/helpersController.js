@@ -187,6 +187,18 @@ async function readEmailBody(req, res) {
 
         // console.log("valido", validJson.Rut);
         if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
+
+            Object.keys(validJson).forEach((key) => {
+                if (
+                    validJson[key] === null ||
+                    validJson[key] === "null" ||
+                    validJson[key] === undefined ||
+                    validJson[key] === "undefined" ||
+                    validJson[key] === ""
+                ) {
+                    validJson[key] = `No tiene [${validJson[key]}] [${key}]`;
+                }
+            });
             return res.status(400).json({ success:false , error: 'No se encuentra RUT en el correo', data : validJson, executionDate : moment().format('DD-MM-YYYY') });
         }
         const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
@@ -195,6 +207,7 @@ async function readEmailBody(req, res) {
         const merged = {
             "EmailData": { ...validJson },
             "ClientData": { ...clientData },
+            "executionDate" : moment().format('DD-MM-YYYY')
         };
 
         res.status(200).json({ merged });
