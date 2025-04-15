@@ -113,55 +113,7 @@ async function readCSV(req, res) {
     }
 }
 
-async function(req,res){
-    async function plainTextRequest(req, res) {
-        const plainText = req.body; // Assuming the plain text is sent in the request body
 
-        try {
-            const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
-            La respuesta debe comenzar directamente con [ y terminar con ].
-            No incluyas ningún texto antes o después del JSON.
-            No uses formato Markdown. 
-            No expliques lo que estás haciendo.
-            Tu respuesta debe ser solamente el JSON. Nada más.;`;
-
-            const userPrompt = `Analiza el siguiente texto plano: "${plainText}" y extrae los datos relevantes para el pedido. 
-            Devuelve un JSON con las siguientes claves:
-            - Razon_social
-            - Direccion_despacho
-            - Comuna
-            - Rut
-            - Pedido_Cantidad_Pink
-            - Pedido_Cantidad_Amargo
-            - Pedido_Cantidad_Leche
-            - Pedido_PrecioTotal_Pink
-            - Pedido_PrecioTotal_Amargo
-            - Pedido_PrecioTotal_Leche
-            - Monto_neto
-            - Iva
-            - Total
-            - Sender_Email
-            - URL_ADDRESS`;
-
-            const response = await client.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt },
-                ]
-            });
-
-            const jsonResponse = response.choices[0].message.content.trim();
-            const sanitizedOutput = jsonResponse.replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
-            const validJson = JSON.parse(sanitizedOutput)[0];
-
-            res.status(200).json({ data: validJson });
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Error processing the plain text request', message: error });
-        }
-    }
-}
 
 async function readEmailBody(req, res) {
     // const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
