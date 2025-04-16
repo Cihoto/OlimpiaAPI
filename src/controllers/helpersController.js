@@ -115,65 +115,70 @@ async function readCSV(req, res) {
 }
 
 async function readEmailBody(req, res) {
-    // const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
-    // Assuming the plain text is sent in the request body
-    const plainText = req.body; // Fallback to req.body if plainText is not provided
-    console.log("hola",req.body)
-    console.log("Received plainText:", plainText);
+
+    try{
+
+
+        // const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
+        // Assuming the plain text is sent in the request body
+        const plainText = req.body; // Fallback to req.body if plainText is not provided
+        console.log("hola",req.body)
+        console.log("Received plainText:", plainText);
+            
+        // Sanitize the email body
+        const sanitizedEmailBody = plainText
+            .replaceAll(/\s+/g, ' ') // Remove all white spaces
+            .trim();
         
-    // Sanitize the email body
-    const sanitizedEmailBody = plainText
-        .replaceAll(/\s+/g, ' ') // Remove all white spaces
-        .trim();
+        console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
+        console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
+
+        const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
+
+        console.log(JSON.parse(sanitizedEmailBody));
+        if (!emailBody || !emailSubject || emailAttached === undefined) {
+            return res.status(400).json({ error: 'Invalid request body' });
+        }
+        let attachedPrompt = ""
+        let OC = ""
+        if(emailAttached !== ""){
+            attachedPrompt = `y el texto que hemos extraido desde un PDF adjunto que trae la orden de compra con el pedido: "${emailAttached}". `
+        }
+
+
+        const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
+        La respuesta debe comenzar directamente con [ y terminar con ].
+        No incluyas ningún texto antes o después del JSON.
+        No uses formato Markdown. 
+        No expliques lo que estás haciendo.
+        Tu respuesta debe ser solamente el JSON. Nada más.;`;
+
+        const userPrompt = `Eres un bot que analiza pedidos para franuí, empresa que comercializa frambuezas bañadas en chocolate. Franuí maneja solamente 3 productos, Frambuezas bañadas en:
+        - Chocolate Amargo
+        - Chocolate de Leche (tradicional)
+        - Chocolate Pink
+        Debes analizar el texto del body del correo: "${emailBody}", el asunto: "${emailSubject}" ${attachedPrompt} , y deberás extraer los datos relevantes para guardarlos en variables. 
+        Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8, por lo tanto ninguna de las variables que extraigas debe contener la palabra Olimpia o nuestro RUT.
+        Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
+        Razon_social: Contiene la razón social del cliente.
+        Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
+        Comuna: Comuna de despacho. Si no la encuentras, devuelve "null".
+        Rut: Contiene el Rut del cliente, si no existe devuelve "null".
+        Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
+        Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
+        Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
+        Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
+        Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
+        Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
+        Orden_de_Compra: es el número de orden de compra. Si no existe, devuelve "null".
+        Monto neto: También llamado subtotal. Si es que existe.
+        Iva: monto del impuesto. Si es que existe.
+        Total: Monto total del pedido, impuestos incluidos. Si es que existe.
+        Sender_Email: Es el email de quien envía
+        URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.`;
     
-    console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
-    console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
 
-    const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
-
-    console.log(JSON.parse(sanitizedEmailBody));
-    if (!emailBody || !emailSubject || emailAttached === undefined) {
-        return res.status(400).json({ error: 'Invalid request body' });
-    }
-    let attachedPrompt = ""
-    let OC = ""
-    if(emailAttached !== ""){
-        attachedPrompt = `y el texto que hemos extraido desde un PDF adjunto que trae la orden de compra con el pedido: "${emailAttached}". `
-    }
-
-
-    const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
-    La respuesta debe comenzar directamente con [ y terminar con ].
-    No incluyas ningún texto antes o después del JSON.
-    No uses formato Markdown. 
-    No expliques lo que estás haciendo.
-    Tu respuesta debe ser solamente el JSON. Nada más.;`;
-
-    const userPrompt = `Eres un bot que analiza pedidos para franuí, empresa que comercializa frambuezas bañadas en chocolate. Franuí maneja solamente 3 productos, Frambuezas bañadas en:
-    - Chocolate Amargo
-    - Chocolate de Leche (tradicional)
-    - Chocolate Pink
-    Debes analizar el texto del body del correo: "${emailBody}", el asunto: "${emailSubject}" ${attachedPrompt} , y deberás extraer los datos relevantes para guardarlos en variables. 
-    Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8, por lo tanto ninguna de las variables que extraigas debe contener la palabra Olimpia o nuestro RUT.
-    Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
-    Razon_social: Contiene la razón social del cliente.
-    Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
-    Comuna: Comuna de despacho. Si no la encuentras, devuelve "null".
-    Rut: Contiene el Rut del cliente, si no existe devuelve "null".
-    Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
-    Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
-    Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
-    Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
-    Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
-    Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
-    Orden_de_Compra: es el número de orden de compra. Si no existe, devuelve "null".
-    Monto neto: También llamado subtotal. Si es que existe.
-    Iva: monto del impuesto. Si es que existe.
-    Total: Monto total del pedido, impuestos incluidos. Si es que existe.
-    Sender_Email: Es el email de quien envía
-    URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.`;
-
-    try {
+    
         const response = await client.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
@@ -222,7 +227,6 @@ async function readEmailBody(req, res) {
             "ClientData": { ...clientData },
             "executionDate" : moment().format('DD-MM-YYYY HH:mm:ss'),
             "OC_date": moment().format('DD-MM-YYYY')
-
         };
 
         res.status(200).json({ merged });
@@ -230,7 +234,33 @@ async function readEmailBody(req, res) {
 
     } catch (error) {
         console.log(error);
-        res.status(500).json({ error: 'Error processing the email body', message: error });
+
+        const response = { 
+            "Razon_social": "[null]  Razon_social",
+            "Direccion_despacho": "[null]  Direccion_despacho",
+            "Comuna": "[null]  Comuna",
+            "Rut": "[null]  Rut",
+            "Pedido_Cantidad_Pink": "[null]  Pedido_Cantidad_Pink",
+            "Pedido_Cantidad_Amargo": "[null]  Pedido_Cantidad_Amargo",
+            "Pedido_Cantidad_Leche": "[null]  Pedido_Cantidad_Leche",
+            "Pedido_PrecioTotal_Pink": "[null]  Pedido_PrecioTotal_Pink",
+            "Pedido_PrecioTotal_Amargo": "[null]  Pedido_PrecioTotal_Amargo",
+            "Pedido_PrecioTotal_Leche": "[null]  Pedido_PrecioTotal_Leche",
+            "Orden_de_Compra": "[null]  Orden_de_Compra",
+            "Monto neto": "[null]  Monto",
+            "Iva": "[null]  Iva",
+            "Total": "[null]  Total",
+            "Sender_Email": "[null]  Sender_Email",
+            "URL_ADDRESS": "[null]  URL_ADDRESS"
+        }
+        
+        res.status(500).json({                
+            success: false, 
+            error: 'No se ha podido procesar el correo', 
+            data: response, 
+            executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
+            OC_date: moment().format('DD-MM-YYYY')
+        });
     }
 }
 
