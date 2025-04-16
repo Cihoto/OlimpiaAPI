@@ -208,7 +208,8 @@ async function readEmailBody(req, res) {
                 success: false, 
                 error: 'No se encuentra RUT en el correo', 
                 data: validJson, 
-                executionDate: moment().format('DD-MM-YYYY HH:mm:ss') 
+                executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
+                OC_date: moment().format('DD-MM-YYYY')
             });
         }
         const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
@@ -217,7 +218,9 @@ async function readEmailBody(req, res) {
         const merged = {
             "EmailData": { ...validJson },
             "ClientData": { ...clientData },
-            "executionDate" : moment().format('DD-MM-YYYY HH:mm:ss')
+            "executionDate" : moment().format('DD-MM-YYYY HH:mm:ss'),
+            "OC_date": moment().format('DD-MM-YYYY')
+
         };
 
         res.status(200).json({ merged });

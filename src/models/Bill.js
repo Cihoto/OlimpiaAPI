@@ -711,8 +711,6 @@ class Bill {
                 return desc.desc.includes(businessCenterName);
             });
 
-            console.log("asldkjalsdkjaldksjalksdjlaksjdlakjsd",{foundBusinessCenter});
-
             if (!foundBusinessCenter) {
                 return {
                     success: false,
