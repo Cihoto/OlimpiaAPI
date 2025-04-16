@@ -116,14 +116,12 @@ async function readCSV(req, res) {
 
 async function readEmailBody(req, res) {
 
+    const plainText = req.body;
     try{
 
 
-        // const { emailBody, emailSubject } = req.body; // Adjusted to handle JSON request body
-        // Assuming the plain text is sent in the request body
-        const plainText = req.body; // Fallback to req.body if plainText is not provided
-        console.log("hola",req.body)
-        console.log("Received plainText:", plainText);
+        // console.log("hola",req.body)
+        // console.log("Received plainText:", plainText);
             
         // Sanitize the email body
         const sanitizedEmailBody = plainText
@@ -215,6 +213,7 @@ async function readEmailBody(req, res) {
                 success: false, 
                 error: 'No se encuentra RUT en el correo', 
                 data: validJson, 
+                requestBody: req.body,
                 executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
                 OC_date: moment().format('DD-MM-YYYY')
             });
@@ -253,10 +252,11 @@ async function readEmailBody(req, res) {
             "Sender_Email": "[null]  Sender_Email",
             "URL_ADDRESS": "[null]  URL_ADDRESS"
         }
-        
+
         res.status(500).json({                
             success: false, 
             error: 'No se ha podido procesar el correo', 
+            requestBody: req.body,
             data: response, 
             executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
             OC_date: moment().format('DD-MM-YYYY')
