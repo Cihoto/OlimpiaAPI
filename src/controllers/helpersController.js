@@ -127,11 +127,13 @@ async function readEmailBody(req, res) {
         .trim();
     
     console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
+    console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
 
     const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
-    if(!emailBody || !emailSubject || !emailAttached) {
-        return res.status(400).json({ error: 'Invalid request body'});
+    console.log(JSON.parse(sanitizedEmailBody));
+    if (!emailBody || !emailSubject || emailAttached === undefined) {
+        return res.status(400).json({ error: 'Invalid request body' });
     }
     let attachedPrompt = ""
     let OC = ""
