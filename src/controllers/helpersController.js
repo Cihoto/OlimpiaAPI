@@ -152,7 +152,7 @@ async function readEmailBody(req, res) {
     - Chocolate de Leche (tradicional)
     - Chocolate Pink
     Debes analizar el texto del body del correo: "${emailBody}", el asunto: "${emailSubject}" ${attachedPrompt} , y deberás extraer los datos relevantes para guardarlos en variables. 
-    Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. 
+    Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8, por lo tanto ninguna de las variables que extraigas debe contener la palabra Olimpia o nuestro RUT.
     Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
     Razon_social: Contiene la razón social del cliente.
     Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
