@@ -197,13 +197,21 @@ class Bill {
     #checkpaymentCondition() {
         try {
             const paymentCodes = [
-                { code:"ANTICIPADO", name: ["ANTICIPADO","0"], paymentDays: 30 },
-                { code:"CONTADO", name: ["CONTADO","1"], paymentDays: 30 },
+
+                { code:"3DIAS", name: ["3DIAS","3"], paymentDays: 3 },
+                { code:"ANTICIPADO", name: ["ANTICIPADO","0"], paymentDays: 1 },
+                { code:"CONTADO", name: ["CONTADO","1"], paymentDays: 1 },
                 { code:"CREDITO120", name: ["CREDITO120","120"], paymentDays: 120 },
+                { code:"CREDITO10", name: ["CREDITO10","10"], paymentDays: 10 },
+                { code:"CREDITO7", name: ["CREDITO7","7"], paymentDays: 7 },
                 { code:"CREDITO15", name: ["CREDITO15","15"], paymentDays: 15 },
                 { code:"CREDITO30", name: ["CREDITO30","30"], paymentDays: 30 },
+                { code:"CREDITO45", name: ["CREDITO45","45"], paymentDays: 45 },
                 { code:"CREDITO3060", name: ["CREDITO3060","360"], paymentDays: 30 },
                 { code:"CREDITO306090", name: ["CREDITO306090","3690"], paymentDays: 30 },
+                { code:"CHEQUE", name: ["CHEQUE","C1"], paymentDays: 1 },
+                { code:"CHEQUE15DIAS", name: ["CHEQUE15DIAS","C15"], paymentDays: 15 },
+                { code:"CHEQUE30IAS", name: ["CHEQUE30IAS","C30"], paymentDays: 30 },
                 { code:"CREDITO5", name: ["CREDITO5","5"], paymentDays: 5 },
                 { code:"CREDITO60", name: ["CREDITO60","60"], paymentDays: 60 },
                 { code:"CREDITO90", name: ["CREDITO90","90"], paymentDays: 90 }
