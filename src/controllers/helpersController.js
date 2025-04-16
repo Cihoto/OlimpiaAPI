@@ -157,14 +157,15 @@ async function readEmailBody(req, res) {
         - Chocolate Pink
         Debes analizar el texto del body del correo: "${emailBody}", el asunto: "${emailSubject}" ${attachedPrompt} , y deberás extraer los datos relevantes para guardarlos en variables. 
         Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8, por lo tanto ninguna de las variables que extraigas debe contener la palabra Olimpia o nuestro RUT.
+        
         Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
         Razon_social: Contiene la razón social del cliente.
         Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
         Comuna: Comuna de despacho. Si no la encuentras, devuelve "null".
         Rut: Contiene el Rut del cliente, si no existe devuelve "null".
-        Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
-        Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
-        Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
+        Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0.
+        Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0.
+        Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0.
         Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
         Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
         Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
@@ -173,8 +174,23 @@ async function readEmailBody(req, res) {
         Iva: monto del impuesto. Si es que existe.
         Total: Monto total del pedido, impuestos incluidos. Si es que existe.
         Sender_Email: Es el email de quien envía
-        URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.`;
-    
+        URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.
+        PaymentMethod:{
+            method: En caso de hacer referencia a un cheque, devolver letra C. En caso de no hacer referencia a un cheque, devolver ""
+            paymentsDays: Devolver el número de días de pago. En caso de no hacer referencia a un cheque, devolver "".
+        } 
+        
+        Las variables "Pedido_Cantidad_Pink", "Pedido_Cantidad_Amargo" y "Pedido_Cantidad_Leche" deben ser números enteros, teniendo en consideracion todas estos puntos:
+        -Todas las cajas contienen 24 unidades.
+        -Si el pedido es multiplo de 24, debes diferenciar si se refiere a 24 unidades o 1 caja. Un caso practico es: 
+            -24 x24 unidades, refiere a 24 cajas de 24 unidades, por lo tanto la cantidad de cajas es 24.
+            -24 cajas x24 unidades, refiere a 24 cajas de 24 unidades, por lo tanto la cantidad de cajas es 24.
+            -48 unidades, refiere a 2 cajas de 24 unidades, por lo tanto la cantidad de cajas es 2.
+        -Reconocer si el pedido es por cajas o por unidades (por ejemplo: 1 caja de chocolate pink o 24 unidades de chocolate pink).
+        -En caso de encontrar N caja/s x 24 unidades solo se debe hacer referencia a la cantidad de cajas, no a las unidades.
+        -En caso de que el detalle del pedido solo haga referencia a una cantidad de unidades de chocolate pink, leche o amargo, se debe dividir por 24 para obtener la cantidad de cajas.
+        -Siempre se considera que la venta es por cajas, no por unidades.`
+        
 
     
         const response = await client.chat.completions.create({
