@@ -158,9 +158,9 @@ async function readEmailBody(req, res) {
     Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
     Comuna: Comuna de despacho. Si no la encuentras, devuelve "null".
     Rut: Contiene el Rut del cliente, si no existe devuelve "null".
-    Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0.
-    Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0.
-    Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0.
+    Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
+    Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
+    Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0 y solo en caso de que la cantidad sea multiplo de 24, debes dividir por 24.
     Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
     Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
     Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
@@ -333,6 +333,7 @@ async function readCSV_private(rutToSearch, address) {
                             data: [],
                             length: results.length,
                             address: address ? true : false,
+                            message: "Cliente no encontrado en base de clientes",
                         });
                         return;
                     }
@@ -342,6 +343,7 @@ async function readCSV_private(rutToSearch, address) {
                             data: results[0],
                             length: results.length,
                             address: true,
+                            message: "Cliente encontrado en base de clientes",
                         });
                         return;
                     }
@@ -353,6 +355,7 @@ async function readCSV_private(rutToSearch, address) {
                             data: first,
                             length: results.length,
                             address: false,
+                            message: "Cliente no encontrado en base de clientes por falta de dirección",
                         });
                         return;
                     }
@@ -388,7 +391,7 @@ async function readCSV_private(rutToSearch, address) {
                             data: found,
                             length: [found].length,
                             address: address ? true : false,
-                            message: "No se encontro nada",
+                            message: "Direccion no encontrada en base de clientes",
                         });
                         return;
                     }
