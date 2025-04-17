@@ -269,7 +269,7 @@ async function readEmailBody(req, res) {
             "URL_ADDRESS": "[null]  URL_ADDRESS"
         }
 
-        res.status(500).json({                
+        res.status(400).json({                
             success: false, 
             error: 'No se ha podido procesar el correo', 
             requestBody: req.body,
