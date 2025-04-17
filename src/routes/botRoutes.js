@@ -9,7 +9,7 @@ router.post('/sendMailToWebHook', async (req, res) => {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify(email)
+        body: JSON.stringify(req.body)
     });
     const data = await response.json();
     console.log("data", data);
