@@ -7,6 +7,7 @@ import { getAllCoinsId,getAllPaymentsConditions,getShops, getPriceList,getPriceL
 } from './src/utils/sales.js';
 import billsRoutes from './src/routes/bills.js';
 import helpersRoutes from './src/routes/helpers.js';
+import botRoutes from './src/routes/botRoutes.js';
 // import googleRoutes from './src/routes/google.js';
 import morgan from 'morgan';
 import Bill from './src/models/Bill.js';
@@ -28,6 +29,8 @@ app.use(authMiddleware);
 
 app.use('/api',billsRoutes);
 app.use('/helpers',helpersRoutes);
+app.use('/bot',botRoutes)
+
 // app.use('/google',googleRoutes)
 // Routes
 app.get('/', async (req, res) => {
