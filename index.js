@@ -50,14 +50,14 @@ app.get('/', async (req, res) => {
   // const priceList = await getPriceList(req.apiKey)
   // const getPriceListDetail = await getPriceListDetails(req.apiKey)
   // const documentAnalysis = await getDocumentAnalysis(req.apiKey)
-  // const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
+  const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
   // const getClientFromId = await getClientByFileId(req.apiKey,"76.322.465-1")
   // const sellersIdd = await sellersId(req.apiKey) 
-  const getProdss = await getProds(req.apiKey)
+  // const getProdss = await getProds(req.apiKey)
   // const getStoragess = await getStorages(req.apiKey)
   // const businessAnalysiss = await businessAnalysis(req.apiKey);// api/Sale/GetDocumentAnalisys
   // const codess = allPayments.items.map((desc) => desc.code);
-  res.json({getProdss})
+  res.json({getClientss})
   return 
   const businessCenter =  await businessCenters(req.apiKey) //preguntar por API //api/Accounting/GetBusinessCenterPlan
   const saleBusinessCenterAccounts = {

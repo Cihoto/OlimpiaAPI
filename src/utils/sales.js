@@ -84,7 +84,7 @@ const getDocumentAnalysis = async (apiKey) => {
 }
 
 const getClients = async(apiKey) =>{
-    const clientsURL = `https://replapi.defontana.com/api/Sale/GetClients?status=1&itemsPerPage=10&pageNumber=1`;
+    const clientsURL = `https://replapi.defontana.com/api/Sale/GetClients?status=1&itemsPerPage=200&pageNumber=2`;
     const clients = await fetch(clientsURL, {
         method: 'GET',
         headers: {

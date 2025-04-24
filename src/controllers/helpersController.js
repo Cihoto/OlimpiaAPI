@@ -447,10 +447,13 @@ async function readCSV_private(rutToSearch, address) {
                     
                     console.log("final final");
                     const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho']);
+                    console.log("deliveryDay1 23123 ", deliveryDay);
+                    console.log("found", found);
+                    console.log("found", found[0]);
                     if (deliveryDay) {
-                        found[0]['deliveryDay'] = deliveryDay;
+                        found['deliveryDay'] = deliveryDay;
                     }else{
-                        found[0]['deliveryDay'] = "";
+                        found['deliveryDay'] = "";
                     }
                     resolve({
                         data: found,
