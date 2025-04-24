@@ -91,6 +91,7 @@ const updateClientByEmail = (email,url) => {
 
 function getDataWithMail(email) {
     try {
+        console.log("Email", email)
         const jsonData = fs.readFileSync(jsonFilePath, "utf8");
         const parsedData = JSON.parse(jsonData);
         // return parsedData

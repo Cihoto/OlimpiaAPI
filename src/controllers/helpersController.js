@@ -2,10 +2,11 @@ import fs from 'fs';
 import csvParser from 'csv-parser';
 import OpenAI from 'openai';
 import moment from 'moment';
+import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 
 const client = new OpenAI();
 
-const CSV = './src/documents/CLIENTES_OLIMPIA.csv'; // Use the file path as a string
+const CSV = './src/documents/CLIENTES_OLIMPIA_ENIX_KNOWLEDGEBASE_COTE2.csv'; // Use the file path as a string
 
 async function readCSV(req, res) {
     const results = [];
@@ -118,18 +119,13 @@ async function readEmailBody(req, res) {
 
     const plainText = req.body;
     try{
-
-
         // console.log("hola",req.body)
         // console.log("Received plainText:", plainText);
             
         // Sanitize the email body
         const sanitizedEmailBody = plainText
             .replaceAll(/\s+/g, ' ') // Remove all white spaces
-            .trim();
-        
-        console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
-        console.log("Sanitized email body:", sanitizedEmailBody); // Log the sanitized email body
+            .trim(); // Trim leading and trailing spaces
 
         const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
@@ -142,7 +138,6 @@ async function readEmailBody(req, res) {
         if(emailAttached !== ""){
             attachedPrompt = `y el texto que hemos extraido desde un PDF adjunto que trae la orden de compra con el pedido: "${emailAttached}". `
         }
-
 
         const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
         La respuesta debe comenzar directamente con [ y terminar con ].
@@ -162,7 +157,7 @@ async function readEmailBody(req, res) {
         Razon_social: Contiene la razón social del cliente.
         Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
         Comuna: Comuna de despacho. Si no la encuentras, devuelve "null".
-        Rut: Contiene el Rut del cliente, si no existe devuelve "null".
+        Rut: Contiene el Rut del cliente, debes buscarlo en el body del correo y en el asunto si no existe devuelve "null".
         Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0.
         Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0.
         Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0.
@@ -387,6 +382,12 @@ async function readCSV_private(rutToSearch, address) {
                     }
 
                     if (results.length == 1) {
+                       const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho']);
+                        if (deliveryDay) {
+                            results[0]['deliveryDay'] = deliveryDay;
+                        }else{
+                            results[0]['deliveryDay'] = "";
+                        }
                         resolve({
                             data: results[0],
                             length: results.length,
@@ -445,6 +446,12 @@ async function readCSV_private(rutToSearch, address) {
                     }
                     
                     console.log("final final");
+                    const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho']);
+                    if (deliveryDay) {
+                        found[0]['deliveryDay'] = deliveryDay;
+                    }else{
+                        found[0]['deliveryDay'] = "";
+                    }
                     resolve({
                         data: found,
                         length: [found].length,
@@ -460,10 +467,6 @@ async function readCSV_private(rutToSearch, address) {
         }
     });
 }
-
-
-
-
 
 
 export { readCSV, readEmailBody };
