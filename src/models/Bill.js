@@ -768,16 +768,21 @@ class Bill {
                 };
             }
             const {productList} = products;
+            const find70724043633542 = productList.find(product => product.code === "70724043633542");
+            console.log("PINKKKKKKKKKKKKKKKKKKKKKK", find70724043633542);
             //verificar que los productos de los detalles existen en la lista de productos
             const productCodes = productList.map(product => product.code);
             let detailList = [];
+
+            console.log({details});
             details.forEach((detail) => {
 
                 if(detail.quantity <= 0 ){
                     return;
                 }
 
-                const productInfo = productList.find(product => product.code === detail.code);
+                const productInfo = productList.find(product => product.code == detail.code);
+                console.log({productInfo});
                 if (!productInfo) {
                     return {
                         success: false,
@@ -823,7 +828,7 @@ class Bill {
     #getProducts = async () => {
         try {
             let paginationInfo = this.#getPagintation();
-            const productsURL = `${process.env.SALE_API_URL}Getproducts?status=0&itemsPerPage=10&pageNumber=1`;
+            const productsURL = `${process.env.SALE_API_URL}Getproducts?status=0&itemsPerPage=100&pageNumber=1`;
             const prods = await fetch(productsURL, {
                 method: 'GET',
                 headers: {

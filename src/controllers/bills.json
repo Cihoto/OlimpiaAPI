@@ -192,5 +192,609 @@
     "gloss": "camino a melipilla 11030",
     "customFields": [],
     "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250424171658",
+    "emissionDate": {
+      "day": "24",
+      "month": "4",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "24",
+      "month": "5",
+      "year": "2025"
+    },
+    "clientFile": "77.644.820-6",
+    "contactIndex": "PARQUE SAN JOAQUIN 8",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "PUERTO MONTT",
+    "city": "PUERTO MONTT",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "24",
+          "month": "4",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "15350",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 80,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "camino a melipilla 11030",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250424171806",
+    "emissionDate": {
+      "day": "24",
+      "month": "4",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "24",
+      "month": "5",
+      "year": "2025"
+    },
+    "clientFile": "77.644.820-6",
+    "contactIndex": "PARQUE SAN JOAQUIN 8",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "PUERTO MONTT",
+    "city": "PUERTO MONTT",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "24",
+          "month": "4",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "15350",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 80,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "camino a melipilla 11030",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250424172001",
+    "emissionDate": {
+      "day": "24",
+      "month": "4",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "24",
+      "month": "5",
+      "year": "2025"
+    },
+    "clientFile": "77.644.820-6",
+    "contactIndex": "PARQUE SAN JOAQUIN 8",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "PUERTO MONTT",
+    "city": "PUERTO MONTT",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "24",
+          "month": "4",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "15350",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 80,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "camino a melipilla 11030",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250424172311",
+    "emissionDate": {
+      "day": "24",
+      "month": "4",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "24",
+      "month": "5",
+      "year": "2025"
+    },
+    "clientFile": "77.644.820-6",
+    "contactIndex": "PARQUE SAN JOAQUIN 8",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "PUERTO MONTT",
+    "city": "PUERTO MONTT",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "24",
+          "month": "4",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "15350",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 80,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "camino a melipilla 11030",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250424172339",
+    "emissionDate": {
+      "day": "24",
+      "month": "4",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "24",
+      "month": "5",
+      "year": "2025"
+    },
+    "clientFile": "77.644.820-6",
+    "contactIndex": "PARQUE SAN JOAQUIN 8",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "PUERTO MONTT",
+    "city": "PUERTO MONTT",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "24",
+          "month": "4",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "15350",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 80,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "camino a melipilla 11030",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250424172446",
+    "emissionDate": {
+      "day": "24",
+      "month": "4",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "24",
+      "month": "5",
+      "year": "2025"
+    },
+    "clientFile": "77.644.820-6",
+    "contactIndex": "PARQUE SAN JOAQUIN 8",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "PUERTO MONTT",
+    "city": "PUERTO MONTT",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "24",
+          "month": "4",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "15350",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 80,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "70724043633542",
+        "count": 40,
+        "productName": "Franuí Chocolate Pink Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 67200,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "camino a melipilla 11030",
+    "customFields": [],
+    "isTransferDocument": true
   }
 ]
