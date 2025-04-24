@@ -295,8 +295,6 @@ function normalizeRut(rut) {
     return formattedRut;
 
 }
-
-
 function searchByAddress(data, address) {
     let bestMatch = null;
     let highestScore = 0;
@@ -363,7 +361,9 @@ async function readCSV_private(rutToSearch, address) {
                     } // Collect all rows
                 })
                 .on('end', async () => {
-
+                    console.log("***********************************************")
+                    console.log("results", results);
+                    
                     results.forEach((item) => {
                         // Normalize prices to numbers
                         item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
