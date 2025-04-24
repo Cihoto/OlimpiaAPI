@@ -8,11 +8,12 @@ import { getAllCoinsId,getAllPaymentsConditions,getShops, getPriceList,getPriceL
 import billsRoutes from './src/routes/bills.js';
 import helpersRoutes from './src/routes/helpers.js';
 import botRoutes from './src/routes/botRoutes.js';
+import devRoutes from './src/routes/dev.js';
 // import googleRoutes from './src/routes/google.js';
 import morgan from 'morgan';
 import Bill from './src/models/Bill.js';
 import cors from 'cors';
-
+import { fileURLToPath } from 'url';
 
 const app = express();
 dotenv.config();
@@ -30,6 +31,10 @@ app.use(authMiddleware);
 app.use('/api',billsRoutes);
 app.use('/helpers',helpersRoutes);
 app.use('/bot',botRoutes)
+
+
+
+app.use('/dev',devRoutes);
 
 // app.use('/google',googleRoutes)
 // Routes

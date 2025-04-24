@@ -1,5 +1,6 @@
 import Bill from '../models/Bill.js';
-import moment from 'moment';
+import fs from 'fs';
+import path from 'path';
 
 // ...existing code...
 
@@ -76,12 +77,25 @@ async function createBill(req, res) {
 
         bill.validate();
         const BILLJSON = await bill.toJSON();
+        const filePath = path.resolve('./src/controllers/bills.json');
+        // res.json(filePath)
+        // return 
+
+        let existingBills = [];
+        if (fs.existsSync(filePath)) {
+            const fileContent = fs.readFileSync(filePath, 'utf-8');
+            existingBills = JSON.parse(fileContent);
+        }
+
+        existingBills.push(BILLJSON);
+
+        fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
         console.log(BILLJSON);
-        res.status(200).json({
-            success: true,
-            data: BILLJSON
-        });
-        return
+        // res.status(200).json({
+        //     success: true,
+        //     data: BILLJSON
+        // });
+        // return
 
         // res.status(200).json(BILLJSON);
 

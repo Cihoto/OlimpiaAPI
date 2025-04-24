@@ -30,7 +30,7 @@ function findDeliveryDayByComuna(comunaToSearch){
         { "comuna": "INDEPENDENCIA", "dia": "LUNES" },
         { "comuna": "QUILICURA", "dia": "LUNES" },
         { "comuna": "LO ESPEJO", "dia": "MARTES" },
-        { "comuna": "MAIPU", "dia": "MARTES" },
+        { "comuna": "MAIPÚ", "dia": "MARTES" },
         { "comuna": "SAN BERNARDO", "dia": "MARTES" },
         { "comuna": "LA FLORIDA", "dia": "MARTES" },
         { "comuna": "PEÑALOLÉN", "dia": "MARTES" },
@@ -56,7 +56,7 @@ function findDeliveryDayByComuna(comunaToSearch){
         { "comuna": "HUECHURABA", "dia": "MIÉRCOLES" },
         { "comuna": "INDEPENDENCIA", "dia": "MIÉRCOLES" },
         { "comuna": "LO ESPEJO", "dia": "JUEVES" },
-        { "comuna": "MAIPU", "dia": "JUEVES" },
+        { "comuna": "MAIPÚ", "dia": "JUEVES" },
         { "comuna": "SAN BERNARDO", "dia": "JUEVES" },
         { "comuna": "LA FLORIDA", "dia": "JUEVES" },
         { "comuna": "PEÑALOLÉN", "dia": "JUEVES" },
@@ -86,7 +86,8 @@ function findDeliveryDayByComuna(comunaToSearch){
 
 
     const matchingDeliveries = deliveryDays.filter((delivery) => {
-        return delivery.comuna.toLowerCase().trim() == comunaToSearch.toLowerCase().trim();
+        const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+        return normalize(delivery.comuna) === normalize(comunaToSearch);
     });
 
     console.log("matchingDeliveries", matchingDeliveries);

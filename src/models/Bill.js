@@ -155,12 +155,12 @@ class Bill {
     
             const saleTaxes = await this.#getSaleTaxes(businessAnalysis.businessAnalysis.taxeAnalysis);
             const globalDiscount = this.#getGlobalDiscount();
-    
+            const uniqueCode = moment().format("YYYYMMDDHHmmss");
             return {
                 documentType: this.documentType,
                 firstFolio: this.firstFolio,
                 lastFolio: this.lastFolio,
-                externalDocumentID: "1101997304",
+                externalDocumentID: uniqueCode,
                 emissionDate: this.#getEmissionDate(),
                 firstFeePaid: this.#getFirstFeePaid(paymentCondition.paymentDays),
                 clientFile: clientData.fileID,
