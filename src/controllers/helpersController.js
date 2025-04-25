@@ -184,7 +184,20 @@ async function readEmailBody(req, res) {
         -Reconocer si el pedido es por cajas o por unidades (por ejemplo: 1 caja de chocolate pink o 24 unidades de chocolate pink).
         -En caso de encontrar N caja/s x 24 unidades solo se debe hacer referencia a la cantidad de cajas, no a las unidades.
         -En caso de que el detalle del pedido solo haga referencia a una cantidad de unidades de chocolate pink, leche o amargo, se debe dividir por 24 para obtener la cantidad de cajas.
-        -Siempre se considera que la venta es por cajas, no por unidades.`
+        -Siempre se considera que la venta es por cajas, no por unidades.
+        
+        Para la variable rut debes considerar lo siguiente:
+        -Puede tener los siguientes formatos:
+            - xx.xxx.xxx-x
+            - xxx.xxx.xxx-x
+            - xxxxxxxx-x
+            - xx.xxx.xxx-x
+        -Puede corrensponder a una empresa o a una persona natural.
+        -Tener en cuenta que en caso de encontrar el rut de Olimpia SPA, se debe seguir buscando el rut en el correo, ya que estamos buscando el rut del cliente, no el de la empresa.
+        -Este campo es sumamente importante, sin este dato la ejecucion del bot no es valida.
+        `
+
+
         
 
     
