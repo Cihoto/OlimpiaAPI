@@ -97,7 +97,7 @@ async function createBill(req, res) {
         // });
         // return
 
-        res.status(200).json(BILLJSON);
+        // res.status(200).json(BILLJSON);
 
         const saveSaleURL = `https://replapi.defontana.com/api/sale/SaveSale`
         const createBillDefontana = await fetch(saveSaleURL,{
