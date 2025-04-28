@@ -2,8 +2,6 @@ import Bill from '../models/Bill.js';
 import fs from 'fs';
 import path from 'path';
 
-// ...existing code...
-
 async function createBill(req, res) {
     if(!req.apiKey) {
         res.status(401).json({code:401, error: 'Error al autenticar' });
@@ -112,7 +110,11 @@ async function createBill(req, res) {
         const createBillDefontanaResponse = await createBillDefontana.json();
         console.log("createBillDefontanaResponse", createBillDefontanaResponse);
 
-        res.status(200).json(createBillDefontanaResponse);
+        res.status(200).json({
+            createBillDefontanaResponse,
+            success: true,
+            data: BILLJSON
+        });
 
         // const checkIssuedBillURL = `https://replapi.defontana.com/api/Sale/GetSaleByExternalDocumentID?externalDocumentID=1101997304`
         // const checkIssuedBill = await fetch(checkIssuedBillURL,{
@@ -152,7 +154,38 @@ async function createBill(req, res) {
         }
     }
 }
+async function getBillById(req, res) {
+    if(!req.apiKey) {
+    
+        res.status(401).json({code:401, error: 'Error al autenticar solicitud' });
+        return;
+    }
+    try {
+        const {billId} = req.params;
+        const checkIssuedBillURL = `${process.env.SALE_API_URL}GetSaleByExternalDocumentID?externalDocumentID=${billId}`
+        const checkIssuedBill = await fetch(checkIssuedBillURL,{
+            method: 'GET',
+            headers:{
+                ContentType: 'application/json',    
+                Authorization: `Bearer ${req.apiKey}`
+            }
+        })
 
-// ...existing code...
+        const checkIssuedBillResponse = await checkIssuedBill.json();
 
-export { createBill };
+        console.log("checkIssuedBillResponse", checkIssuedBillResponse);
+
+        res.json(checkIssuedBillResponse);
+
+
+    } catch (error) {
+        console.log (error);
+        
+        return res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error' });
+        
+    }
+}
+
+
+
+export { createBill,getBillById };
