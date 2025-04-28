@@ -30,10 +30,12 @@ async function readCSV(req, res) {
 
                 results.forEach((item) => {
                     // Normalize prices to numbers
-                    item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
-                    item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
+                    item['Precio Caja'] = item['Precio Caja'].replaceAll('.', '');
                     item['Precio Caja'] = Number(item['Precio Caja']);
+                    // item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
                 })
+
+
 
                 if (results.length == 0) {
                     res.status(200).json({
@@ -379,10 +381,15 @@ async function readCSV_private(rutToSearch, address) {
                     
                     results.forEach((item) => {
                         // Normalize prices to numbers
+
                         item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
+                        item['Precio Caja'] = item['Precio Caja'].replaceAll('.', '');
                         item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
                         item['Precio Caja'] = Number(item['Precio Caja']);
                     });
+
+                    
+                    // return results;
 
                     if (results.length == 0) {
                         resolve({
