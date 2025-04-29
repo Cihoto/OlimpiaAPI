@@ -183,10 +183,22 @@ async function readEmailBody(req, res) {
             -24 x24 unidades, refiere a 24 cajas de 24 unidades, por lo tanto la cantidad de cajas es 24.
             -24 cajas x24 unidades, refiere a 24 cajas de 24 unidades, por lo tanto la cantidad de cajas es 24.
             -48 unidades, refiere a 2 cajas de 24 unidades, por lo tanto la cantidad de cajas es 2.
+            -24 uds, refiere a 1 caja de 24 unidades, por lo tanto la cantidad de cajas es 1.
+            Estas son otras formas de entender la tarea:
+            -Si el pedido solo menciona unidades y el numero es multiplo de 24, se debe dividir por 24 para obtener la cantidad de cajas, ejemplos:
+                -48 unidades de chocolate pink, equivale a 2 cajas de chocolate pink.
+                -22 unidades de chocolate pink, equivale a 22 cajas de chocolate pink. 
+                -24 unidades de chocolate pink, equivale a 1 caja de chocolate pink.
+            -En caso de tener la mencionar cajas, se debe hacer referencia a la cantidad de cajas, no a las unidades. Ejemplo:
+                -21 cajas de chocolate, equivale a 21 cajas de chocolate.
+                -24 cajas de chocolate, equivale a 24 caja de chocolate.
+                -48 cajas de chocolate, equivale a 48 cajas de chocolate.
+                *estos tres ultimos casos son solo cuando se mencione que quieren cajas de chocolate pink, no unidades.       
         -Reconocer si el pedido es por cajas o por unidades (por ejemplo: 1 caja de chocolate pink o 24 unidades de chocolate pink).
         -En caso de encontrar N caja/s x 24 unidades solo se debe hacer referencia a la cantidad de cajas, no a las unidades.
         -En caso de que el detalle del pedido solo haga referencia a una cantidad de unidades de chocolate pink, leche o amargo, se debe dividir por 24 para obtener la cantidad de cajas.
         -Siempre se considera que la venta es por cajas, no por unidades.
+        -OLIMPIA SPA no vende unidades, solo cajas de 24 unidades. no se hacen ventas por unidades ejemplo (23 unidades de una caja)
         
         Para la variable rut debes considerar lo siguiente:
         -Puede tener los siguientes formatos:
@@ -194,7 +206,8 @@ async function readEmailBody(req, res) {
             - xxx.xxx.xxx-x
             - xxxxxxxx-x
             - xx.xxx.xxx-x
-        -Puede corrensponder a una empresa o a una persona natural.
+        -El rut puede estar tanto en el inicio como en el final del correo.
+        -El rut puede estar en el asunto o en el cuerpo del correo.
         -Tener en cuenta que en caso de encontrar el rut de Olimpia SPA, se debe seguir buscando el rut en el correo, ya que estamos buscando el rut del cliente, no el de la empresa.
         -Este campo es sumamente importante, sin este dato la ejecucion del bot no es valida.
         `
