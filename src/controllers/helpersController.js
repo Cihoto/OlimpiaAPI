@@ -3,10 +3,11 @@ import csvParser from 'csv-parser';
 import OpenAI from 'openai';
 import moment from 'moment';
 import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
+import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 
 const client = new OpenAI();
 
-const CSV = './src/documents/CLIENTES_OLIMPIA_ENIX_KNOWLEDGEBASE_COTE2.csv'; // Use the file path as a string
+const CSV = './src/documents/OLIMPIA_KNOWLEDGE_BASE.csv'; // Use the file path as a string
 
 async function readCSV(req, res) {
     const results = [];
@@ -171,6 +172,7 @@ async function readEmailBody(req, res) {
         Iva: monto del impuesto. Si es que existe.
         Total: Monto total del pedido, impuestos incluidos. Si es que existe.
         Sender_Email: Es el email de quien envía
+        precio_caja: Precio de la caja de chocolate pink, amargo o leche. Si no existe, devuelve 0.
         URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.
         PaymentMethod:{
             method: En caso de hacer referencia a un cheque, devolver letra C. En caso de no hacer referencia a un cheque, devolver ""
@@ -210,12 +212,24 @@ async function readEmailBody(req, res) {
         -El rut puede estar en el asunto o en el cuerpo del correo.
         -Tener en cuenta que en caso de encontrar el rut de Olimpia SPA, se debe seguir buscando el rut en el correo, ya que estamos buscando el rut del cliente, no el de la empresa.
         -Este campo es sumamente importante, sin este dato la ejecucion del bot no es valida.
+        
+        Razon_social:
+        -La razon social puede estar en el cuerpo del correo o en el asunto.
+        -En caso de no haber una indicacion de enviar a una razon social especifica, podria mencionarse sucursal, local o razon social.
+
+        Direccion_despacho:
+        -La dirección de despacho puede estar en el cuerpo del correo o en el asunto.
+        -En caso de no haber una indicacion de enviar a una direccion especifica, podria mencionarse sucursal, local o direccion de despacho.
+        -Debes extraer toda la direccion, incluyendo la comuna y el nombre de la calle.
+        -Todas las direcciones pertenecen al territorio chileno por lo que las comunas son chilenas.
+        
+        precio_caja:
+        -El precio de la caja de chocolate pink, amargo o leche. Si no existe, devuelve 0.
+        -Debes extraer el precio de la caja, ronda entre los $60000 y $80000 aproximadamente(los valores fluctuan entre clientes por lo que no siempre es el mismo).
+        -El precio por caja es el mismo para todos los productos.
+        -en caso de que no hayan precios, devolver 0.
         `
 
-
-        
-
-    
         const response = await client.chat.completions.create({
             model: 'gpt-4o',
             messages: [
@@ -229,13 +243,21 @@ async function readEmailBody(req, res) {
         const validJson = JSON.parse(sanitizedOutput)[0];
 
         console.log(validJson);
-
-        if (!validJson.Rut) {
-            console.log("invalido", validJson.Rut);
+        
+        let rutIsFound = false
+        if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
+            const foundSpecialCustomer =   foundSpecialCustomers(validJson.Razon_social);
+            if(foundSpecialCustomer){
+                validJson.Rut = foundSpecialCustomer;
+                rutIsFound = true
+            }
+        }else{
+            rutIsFound = true
         }
 
-        // console.log("valido", validJson.Rut);
-        if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
+
+        // if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
+        if(rutIsFound == false){ 
 
             Object.keys(validJson).forEach((key) => {
                 if (
@@ -257,8 +279,8 @@ async function readEmailBody(req, res) {
                 OC_date: moment().format('DD-MM-YYYY')
             });
         }
-        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho);
 
+        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja); // Call the readCSV function with the RUT and address
         console.log("clientData", clientData);
         const merged = {
             "EmailData": { ...validJson },
@@ -372,7 +394,7 @@ async function integrateWithChatGPT(addresses, targetAddress) {
     }
 }
 
-async function readCSV_private(rutToSearch, address) {
+async function readCSV_private(rutToSearch, address, boxPrice) {
     const results = [];
     console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
     console.log(`address to search: ${address}`); // Log the address to search
@@ -401,7 +423,6 @@ async function readCSV_private(rutToSearch, address) {
                         item['Precio Caja'] = Number(item['Precio Caja']);
                     });
 
-                    
                     // return results;
 
                     if (results.length == 0) {
@@ -410,9 +431,11 @@ async function readCSV_private(rutToSearch, address) {
                             length: results.length,
                             address: address ? true : false,
                             message: "Cliente no encontrado en base de clientes",
+                            boxPriceIsEqual: false
                         });
                         return;
                     }
+
 
                     if (results.length == 1) {
                        const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho']);
@@ -426,6 +449,7 @@ async function readCSV_private(rutToSearch, address) {
                             length: results.length,
                             address: true,
                             message: "Cliente encontrado en base de clientes",
+                            boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
                         });
                         return;
                     }
@@ -438,6 +462,7 @@ async function readCSV_private(rutToSearch, address) {
                             length: results.length,
                             address: false,
                             message: "Cliente no encontrado en base de clientes por falta de dirección",
+                            boxPriceIsEqual: false
                         });
                         return;
                     }
@@ -458,6 +483,7 @@ async function readCSV_private(rutToSearch, address) {
                             data: gptResponse,
                             length: gptResponse.length,
                             address: address ? true : false,
+                            boxPriceIsEqual: false
                         });
                         return;
                     }
@@ -474,25 +500,25 @@ async function readCSV_private(rutToSearch, address) {
                             length: [found].length,
                             address: address ? true : false,
                             message: "Direccion no encontrada en base de clientes",
+                            boxPriceIsEqual: false
                         });
                         return;
                     }
-                    
-                    console.log("final final");
+
                     const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho']);
-                    console.log("deliveryDay1 23123 ", deliveryDay);
-                    console.log("found", found);
-                    console.log("found", found[0]);
+
                     if (deliveryDay) {
                         found['deliveryDay'] = deliveryDay;
                     }else{
                         found['deliveryDay'] = "";
                     }
+
                     resolve({
                         data: found,
                         length: [found].length,
                         address: true,
                         message: "Se encontro una coincidencia",
+                        boxPriceIsEqual: boxPrice == found['Precio Caja'] ? true : false
                     });
                 })
                 .on('error', (error) => {
