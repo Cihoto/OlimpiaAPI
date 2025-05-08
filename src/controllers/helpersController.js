@@ -7,7 +7,7 @@ import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 
 const client = new OpenAI();
 
-const CSV = './src/documents/OLIMPIA_KNOWLEDGE_BASE.csv'; // Use the file path as a string
+const CSV = './src/documents/KNOWLEDGEBASE.csv'; // Use the file path as a string
 
 async function readCSV(req, res) {
     const results = [];
@@ -150,7 +150,7 @@ async function readEmailBody(req, res) {
             console.log("Invalid request, missing fields:", missingFields);
             return res.status(400).json({ error: 'Invalid request body' });
         }
-        
+
         let attachedPrompt = ""
         let OC = ""
         if(emailAttached !== ""){
