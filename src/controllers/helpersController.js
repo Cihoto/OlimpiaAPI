@@ -254,7 +254,7 @@ async function readEmailBody(req, res) {
             *pedido con retiro
         -debes buscar en todo el texto buscando patrones que indiquen que el pedido es para retiro en sucursal o posee modalidad de despacho.
         -En caso de no quedar claro si el pedido es para retiro o despacho, devolver true para ir a buscar la direccion de despacho
-        -Cuando el pedido es para retiro, debes cambiar el valor de direccion despacho a este formato "REERERTIRO" + direccion o sucursal.
+        -Cuando el pedido es para retiro, debes cambiar el valor de direccion despacho a "RETIRO".
         `
 
         const response = await client.chat.completions.create({
@@ -353,9 +353,6 @@ async function readEmailBody(req, res) {
     }
 }
 
-
-
-
 function normalizeRut(rut) {
     // Remove all non-numeric characters except 'k' or 'K' (used in Chilean RUTs)
     rut = rut.replace(/[^0-9kK]/g, '');
@@ -371,8 +368,8 @@ function normalizeRut(rut) {
     const formattedRut = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '-' + verifier;
 
     return formattedRut;
-
 }
+
 function searchByAddress(data, address) {
     let bestMatch = null;
     let highestScore = 0;
@@ -397,8 +394,6 @@ function calculateSimilarity(str1, str2) {
 }
 
 //integracion con chat gpt
-
-
 
 async function integrateWithChatGPT(addresses, targetAddress) {
 

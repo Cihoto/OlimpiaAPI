@@ -1,4 +1,5 @@
 import moment from 'moment';
+import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 
 class Bill {
     constructor({
@@ -19,7 +20,8 @@ class Bill {
         ventaRecDesGlobal = null,
         gloss = null,
         customFields = null,
-        isTransferDocument = null
+        isTransferDocument = null,
+        deliveryDay = null
     } = {}) {
         this.apiKey = apiKey;
         this.documentType = documentType;
@@ -39,6 +41,7 @@ class Bill {
         this.gloss = gloss;
         this.customFields = customFields;
         this.isTransferDocument = isTransferDocument;
+        this.deliveryDay = deliveryDay;
     }
 
     validate() {
@@ -190,7 +193,8 @@ class Bill {
             if (error.code && error.message) {
                 throw error;
             }
-            throw { code: 500, error: "Internal Server Error", message: "An unexpected error occurred" };
+            // throw { code: 500, error: "Internal Server Error", message: "An unexpected error occurred" };
+            throw { code: 500, error: error, message: "An unexpected error occurred" };
         }
     }
 
@@ -378,7 +382,20 @@ class Bill {
     }
 
     #getEmissionDate(){
+
+        const deliveryDay = this.deliveryDay ? moment(this.deliveryDay, "YYYY-MM-DD") : null;
+
+        // findDeliveryDayByComuna(this.deliveryDay)
+        if(deliveryDay && deliveryDay.isValid()){
+            return {
+                day: deliveryDay.format('D'),
+                month: deliveryDay.format('M'),
+                year: deliveryDay.format('YYYY')
+            }
+        }
+        // If deliveryDay is not provided or invalid, use today's date
         const today = moment();
+
         return {
             day: today.format('D'),
             month: today.format('M'),
@@ -387,6 +404,18 @@ class Bill {
     }
 
     #getFirstFeePaid(paymentsDays){
+        
+        const deloveryDay = this.deliveryDay ? moment(this.deliveryDay, "YYYY-MM-DD") : null;
+
+        if(deloveryDay && deloveryDay.isValid()){
+            const paymentDate = deloveryDay.add(paymentsDays, 'days');
+            return {
+                day: paymentDate.format('D'),
+                month: paymentDate.format('M'),
+                year: paymentDate.format('YYYY')
+            }
+        }
+
         const paymentDate = moment().add(paymentsDays, 'days');
         return {
             day: paymentDate.format('D'),

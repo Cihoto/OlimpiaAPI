@@ -71,6 +71,7 @@ async function createBill(req, res) {
         bill.gloss = body.gloss;
         bill.customFields = body.customFields;
         bill.isTransferDocument = body.isTransferDocument;
+        bill.deliveryDay = body.deliveryDay ? body.deliveryDay : null;
 
 
         bill.validate();
@@ -88,12 +89,13 @@ async function createBill(req, res) {
         existingBills.push(BILLJSON);
 
         fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
+
         console.log(BILLJSON);
-        // res.status(200).json({
-        //     success: true,
-        //     data: BILLJSON
-        // });
-        // return
+        res.status(200).json({
+            success: true,
+            data: BILLJSON
+        });
+        return
 
         // res.status(200).json(BILLJSON);
 
@@ -143,7 +145,7 @@ async function createBill(req, res) {
 
         
     } catch (error) {
-        console.error('Error creating bill:', error);
+        console.error('Error creating billsdasdasd:', error);
         if (error.code && error.message) {
             res.status(error.code).json({	
                 ...error,
