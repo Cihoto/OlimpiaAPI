@@ -133,9 +133,24 @@ async function readEmailBody(req, res) {
         const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
         console.log(JSON.parse(sanitizedEmailBody));
-        if (!emailBody || !emailSubject || emailAttached === undefined) {
+        // if (emailBody == null || emailSubject == null || emailAttached == null) {
+        //     console.log("Invalid request emailBody:", emailBody);
+        //     console.log("Invalid request emailSubject:", emailSubject);
+        //     console.log("Invalid request emailAttached:", emailAttached);
+        //     // Return an error response if any of the required fields are missing
+
+        //     return res.status(400).json({ error: 'Invalid request body' });
+        // }
+
+        const requiredFields = ['emailBody', 'emailSubject', 'emailAttached'];
+
+        const missingFields = requiredFields.filter(field => !(field in JSON.parse(sanitizedEmailBody)));
+
+        if (missingFields.length > 0) {
+            console.log("Invalid request, missing fields:", missingFields);
             return res.status(400).json({ error: 'Invalid request body' });
         }
+        
         let attachedPrompt = ""
         let OC = ""
         if(emailAttached !== ""){
@@ -177,7 +192,8 @@ async function readEmailBody(req, res) {
         PaymentMethod:{
             method: En caso de hacer referencia a un cheque, devolver letra C. En caso de no hacer referencia a un cheque, devolver ""
             paymentsDays: Devolver el número de días de pago. En caso de no hacer referencia a un cheque, devolver "".
-        } 
+        }
+        isDelivery: En caso de que el pedido sea para delivery, devolver true. En caso de que no sea para delivery, devolver false.
         
         Las variables "Pedido_Cantidad_Pink", "Pedido_Cantidad_Amargo" y "Pedido_Cantidad_Leche" deben ser números enteros, teniendo en consideracion todas estos puntos:
         -Todas las cajas contienen 24 unidades.
@@ -228,6 +244,17 @@ async function readEmailBody(req, res) {
         -Debes extraer el precio de la caja, ronda entre los $60000 y $80000 aproximadamente(los valores fluctuan entre clientes por lo que no siempre es el mismo).
         -El precio por caja es el mismo para todos los productos.
         -en caso de que no hayan precios, devolver 0.
+
+        isDelivery:
+        -En caso de que el pedido sea para delivery, devolver true. En caso de que no sea para delivery, devolver false.
+        -Se debe determinar si el pedido requiere despacho o tendrá modalidad de retiro en sucursal.
+        -Casos de retiro (solo ejemplos):
+            *Te quiero hacer un pedido de 1 caja de Franui dulce y 1 caja de Franui amargo,
+             para retirar este viernes 9 de mayo
+            *pedido con retiro
+        -debes buscar en todo el texto buscando patrones que indiquen que el pedido es para retiro en sucursal o posee modalidad de despacho.
+        -En caso de no quedar claro si el pedido es para retiro o despacho, devolver true para ir a buscar la direccion de despacho
+        -Cuando el pedido es para retiro, debes cambiar el valor de direccion despacho a este formato "REERERTIRO" + direccion o sucursal.
         `
 
         const response = await client.chat.completions.create({
@@ -242,7 +269,8 @@ async function readEmailBody(req, res) {
         const sanitizedOutput = jsonResponse.replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
         const validJson = JSON.parse(sanitizedOutput)[0];
 
-        console.log(validJson);
+        console.log("***********************************************VALID JSON *************************************************");
+        console.log({validJson});
         
         let rutIsFound = false
         if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
