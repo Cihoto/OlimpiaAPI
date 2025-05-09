@@ -130,7 +130,7 @@ async function readEmailBody(req, res) {
             .replaceAll(/\s+/g, ' ') // Remove all white spaces
             .trim(); // Trim leading and trailing spaces
 
-        const {emailBody, emailSubject, emailAttached} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
+        const {emailBody, emailSubject, emailAttached, emailDate} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
         console.log(JSON.parse(sanitizedEmailBody));
         // if (emailBody == null || emailSubject == null || emailAttached == null) {
@@ -142,7 +142,7 @@ async function readEmailBody(req, res) {
         //     return res.status(400).json({ error: 'Invalid request body' });
         // }
 
-        const requiredFields = ['emailBody', 'emailSubject', 'emailAttached'];
+        const requiredFields = ['emailBody', 'emailSubject', 'emailAttached','emailDate'];
 
         const missingFields = requiredFields.filter(field => !(field in JSON.parse(sanitizedEmailBody)));
 
@@ -311,7 +311,7 @@ async function readEmailBody(req, res) {
             });
         }
 
-        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery); // Call the readCSV function with the RUT and address
+        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery,emailDate); // Call the readCSV function with the RUT and address
         console.log("clientData", clientData);
         const merged = {
             "EmailData": { ...validJson },
@@ -420,7 +420,7 @@ async function integrateWithChatGPT(addresses, targetAddress) {
     }
 }
 
-async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
+async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailDate) {
     const results = [];
     console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
     console.log(`address to search: ${address}`); // Log the address to search
@@ -465,7 +465,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
                     console.log("1")
 
                     if (results.length == 1) {
-                        const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho']);
+                        const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho'],emailDate);
                         if (deliveryDay) {
                             results[0]['deliveryDay'] = `${deliveryDay}`;
                         }else{
@@ -544,7 +544,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
                         return;
                     }
 
-                    const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho']);
+                    const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho'],emailDate);
 
                     if (deliveryDay) {
                         found['deliveryDay'] = `${deliveryDay}`;

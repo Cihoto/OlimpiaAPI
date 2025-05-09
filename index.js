@@ -15,6 +15,7 @@ import Bill from './src/models/Bill.js';
 import cors from 'cors';
 import bannerRoutes from './src/routes/bannerRouter.js';
 import { fileURLToPath } from 'url';
+import moment from 'moment';
 
 const app = express();
 dotenv.config();
@@ -40,6 +41,14 @@ app.use('/dev',devRoutes);
 // app.use('/google',googleRoutes)
 // Routes
 app.get('/', async (req, res) => {
+
+
+  const date = "5 de mayo del 2025";
+  const formattedDate = moment(date, "D [de] MMMM [del] YYYY", "es").format("YYYY-MM-DD");
+  res.json({ formattedDate });
+
+
+  return 
 
   if(!req.apiKey) {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });

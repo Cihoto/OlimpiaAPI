@@ -8,9 +8,12 @@
 import moment from 'moment-timezone'; // Import moment-timezone for timezone support
 moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
 
-function findDeliveryDayByComuna(comunaToSearch){
+function findDeliveryDayByComuna(comunaToSearch,emailDate){
 
     console.log("comunaToSearch", comunaToSearch.toLowerCase());
+
+    const formattedDate = moment(emailDate, "D [de] MMMM [del] YYYY", "es").format("YYYY-MM-DD");
+
 
     if(!comunaToSearch || typeof comunaToSearch !== 'string') {
         return null; // Invalid input
@@ -93,8 +96,8 @@ function findDeliveryDayByComuna(comunaToSearch){
     console.log("matchingDeliveries", matchingDeliveries);
 
     if (matchingDeliveries.length > 0) {
-        const now = moment();
-        console.log("now", now.format('YYYY-MM-DD HH:mm:ss'));
+        const referenceDate = moment(formattedDate, 'YYYY-MM-DD');
+        console.log("referenceDate", referenceDate.format('YYYY-MM-DD HH:mm:ss'));
         const cutoffHour = 8; // 12 AM cutoff time
         const daysOfWeek = ["DOMINGO", "LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
         let closestDate = null;
@@ -105,19 +108,19 @@ function findDeliveryDayByComuna(comunaToSearch){
             const targetDayIndex = daysOfWeek.indexOf(targetDay);
 
             if (targetDayIndex !== -1) {
-                let daysUntilNextTarget = (targetDayIndex - now.isoWeekday() + 7) % 7;
+                let daysUntilNextTarget = (targetDayIndex - referenceDate.isoWeekday() + 7) % 7;
 
                 // If the target day is today and the current time is before the cutoff hour
-                if (daysUntilNextTarget === 0 && now.hour() < cutoffHour) {
-                    closestDate = now.format('YYYY-MM-DD');
+                if (daysUntilNextTarget === 0 && referenceDate.hour() < cutoffHour) {
+                    closestDate = referenceDate.format('YYYY-MM-DD');
                     minDaysUntilNextTarget = 0; // No need to check further
-                } else if (daysUntilNextTarget > 0 || now.hour() >= cutoffHour) {
+                } else if (daysUntilNextTarget > 0 || referenceDate.hour() >= cutoffHour) {
                     if (daysUntilNextTarget === 0) {
                         daysUntilNextTarget = 7; // Move to the next week's target day
                     }
                     if (daysUntilNextTarget < minDaysUntilNextTarget) {
                         minDaysUntilNextTarget = daysUntilNextTarget;
-                        closestDate = now.clone().add(daysUntilNextTarget, 'days').format('YYYY-MM-DD');
+                        closestDate = referenceDate.clone().add(daysUntilNextTarget, 'days').format('YYYY-MM-DD');
                     }
                 }
             }
