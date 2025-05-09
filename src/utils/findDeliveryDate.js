@@ -12,7 +12,7 @@ function findDeliveryDayByComuna(comunaToSearch,emailDate){
 
     console.log("comunaToSearch", comunaToSearch.toLowerCase());
 
-    const formattedDate = moment(emailDate, "D [de] MMMM [del] YYYY", "es").format("YYYY-MM-DD");
+    const formattedDate = moment(emailDate).format("YYYY/MM/DD");
 
 
     if(!comunaToSearch || typeof comunaToSearch !== 'string') {
