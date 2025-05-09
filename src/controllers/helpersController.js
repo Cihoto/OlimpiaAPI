@@ -120,7 +120,7 @@ async function readCSV(req, res) {
 
 async function readEmailBody(req, res) {
 
-    const plainText = req.body;
+        const plainText = req.body;
     try{
         // console.log("hola",req.body)
         // console.log("Received plainText:", plainText);
@@ -308,7 +308,7 @@ async function readEmailBody(req, res) {
             });
         }
 
-        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja); // Call the readCSV function with the RUT and address
+        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery); // Call the readCSV function with the RUT and address
         console.log("clientData", clientData);
         const merged = {
             "EmailData": { ...validJson },
@@ -417,7 +417,7 @@ async function integrateWithChatGPT(addresses, targetAddress) {
     }
 }
 
-async function readCSV_private(rutToSearch, address, boxPrice) {
+async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
     const results = [];
     console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
     console.log(`address to search: ${address}`); // Log the address to search
@@ -461,7 +461,7 @@ async function readCSV_private(rutToSearch, address, boxPrice) {
 
 
                     if (results.length == 1) {
-                       const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho']);
+                        const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho']);
                         if (deliveryDay) {
                             results[0]['deliveryDay'] = deliveryDay;
                         }else{
@@ -488,6 +488,17 @@ async function readCSV_private(rutToSearch, address, boxPrice) {
                             boxPriceIsEqual: false
                         });
                         return;
+                    }
+
+                    if(isDelivery == false && results.length > 1){
+                        results[0]['deliveryDay'] = "";
+                        resolve({
+                            data: results[0],
+                            length: results.length,
+                            address: true,
+                            message: "No se puede encontrar coincidencias por falta de dirección",
+                            boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
+                        });
                     }
 
                     // Map results array for GPT token limitation

@@ -13,6 +13,7 @@ import devRoutes from './src/routes/dev.js';
 import morgan from 'morgan';
 import Bill from './src/models/Bill.js';
 import cors from 'cors';
+import bannerRoutes from './src/routes/bannerRouter.js';
 import { fileURLToPath } from 'url';
 
 const app = express();
@@ -104,6 +105,8 @@ app.get('/', async (req, res) => {
   res.send('Hello World, this is your api token ' + req.apiKey);
 
 });
+
+app.use('/api/banner', bannerRoutes);
 
 
 
