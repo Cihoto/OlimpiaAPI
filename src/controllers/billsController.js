@@ -90,12 +90,12 @@ async function createBill(req, res) {
 
         fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
 
-        console.log(BILLJSON);
-        res.status(200).json({
-            success: true,
-            data: BILLJSON
-        });
-        return
+        // console.log(BILLJSON);
+        // res.status(200).json({
+        //     success: true,
+        //     data: BILLJSON
+        // });
+        // return
 
         // res.status(200).json(BILLJSON);
 
