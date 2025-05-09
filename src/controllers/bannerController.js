@@ -20,8 +20,15 @@ async function checkifBusinessIsBanned (req,res){
     try {
         const plainText = req.body;
 
-        const sanitizedEmailBody = plainText
+        plainText
         .replaceAll(/\s+/g, ' ') // Remove all white spaces
+        .replaceAll(/"(?!\s*[:,}\]])/g, '') // Remove all " that do not correspond to a JSON
+        .replaceAll(/[^\w\s:{}[\],"]/g, '') // Remove all special characters except JSON valid ones
+        .trim(); // Trim leading and trailing spaces
+        const sanitizedEmailBody = JSON.stringify(plainText)
+        .replaceAll(/\s+/g, ' ') // Remove all white spaces
+        .replaceAll(/"(?!\s*[:,}\]])/g, '') // Remove all " that do not correspond to a JSON
+        .replaceAll(/[^\w\s:{}[\],"]/g, '') // Remove all special characters except JSON valid ones
         .trim(); // Trim leading and trailing spaces
 
         const {emailContent, senderEmails, emailSubject} = JSON.parse(sanitizedEmailBody);

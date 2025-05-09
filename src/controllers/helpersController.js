@@ -195,28 +195,44 @@ async function readEmailBody(req, res) {
         }
         isDelivery: En caso de que el pedido sea para delivery, devolver true. En caso de que no sea para delivery, devolver false.
         
-        Las variables "Pedido_Cantidad_Pink", "Pedido_Cantidad_Amargo" y "Pedido_Cantidad_Leche" deben ser números enteros, teniendo en consideracion todas estos puntos:
-        -Todas las cajas contienen 24 unidades.
-        -Si el pedido es multiplo de 24, debes diferenciar si se refiere a 24 unidades o 1 caja. Un caso practico es: 
-            -24 x24 unidades, refiere a 24 cajas de 24 unidades, por lo tanto la cantidad de cajas es 24.
-            -24 cajas x24 unidades, refiere a 24 cajas de 24 unidades, por lo tanto la cantidad de cajas es 24.
-            -48 unidades, refiere a 2 cajas de 24 unidades, por lo tanto la cantidad de cajas es 2.
-            -24 uds, refiere a 1 caja de 24 unidades, por lo tanto la cantidad de cajas es 1.
-            Estas son otras formas de entender la tarea:
-            -Si el pedido solo menciona unidades y el numero es multiplo de 24, se debe dividir por 24 para obtener la cantidad de cajas, ejemplos:
-                -48 unidades de chocolate pink, equivale a 2 cajas de chocolate pink.
-                -22 unidades de chocolate pink, equivale a 22 cajas de chocolate pink. 
-                -24 unidades de chocolate pink, equivale a 1 caja de chocolate pink.
-            -En caso de tener la mencionar cajas, se debe hacer referencia a la cantidad de cajas, no a las unidades. Ejemplo:
-                -21 cajas de chocolate, equivale a 21 cajas de chocolate.
-                -24 cajas de chocolate, equivale a 24 caja de chocolate.
-                -48 cajas de chocolate, equivale a 48 cajas de chocolate.
-                *estos tres ultimos casos son solo cuando se mencione que quieren cajas de chocolate pink, no unidades.       
-        -Reconocer si el pedido es por cajas o por unidades (por ejemplo: 1 caja de chocolate pink o 24 unidades de chocolate pink).
-        -En caso de encontrar N caja/s x 24 unidades solo se debe hacer referencia a la cantidad de cajas, no a las unidades.
-        -En caso de que el detalle del pedido solo haga referencia a una cantidad de unidades de chocolate pink, leche o amargo, se debe dividir por 24 para obtener la cantidad de cajas.
-        -Siempre se considera que la venta es por cajas, no por unidades.
-        -OLIMPIA SPA no vende unidades, solo cajas de 24 unidades. no se hacen ventas por unidades ejemplo (23 unidades de una caja)
+        Tu tarea es identificar correctamente cuántas cajas de productos ha solicitado cada cliente. Cada caja contiene 24 unidades. Debes analizar el texto del pedido y transformar cualquier mención a unidades o cajas en una cantidad numérica entera correspondiente a cajas
+
+        Reglas
+        1 Siempre debes entregar la cantidad en cajas no en unidades
+        2 Si el pedido menciona caja o cajas usa directamente ese número como la cantidad de cajas
+        Ejemplos
+        1 caja de chocolate pink equivale a 1
+        24 cajas equivale a 24
+        48 cajas x 24 unidades equivale a 48
+        3 Si el pedido menciona solo unidades unidades uds unidades de y el número es múltiplo de 24 divide por 24 para obtener la cantidad de cajas
+        Ejemplos
+        48 unidades de chocolate pink equivale a 2
+        24 uds equivale a 1
+        72 unidades equivale a 3
+        4 Si el pedido menciona una cantidad que no es múltiplo de 24 y no dice que son cajas la cantidad es inválida Devuelve 0 en ese caso
+        Ejemplos
+        23 unidades de chocolate equivale a 0
+        25 uds de leche equivale a 0
+        5 Si el texto menciona algo como 24 x 24 unidades o 24 cajas x 24 unidades interpreta que se trata de 24 cajas No multipliques por 24
+
+        Consideraciones adicionales
+        OLIMPIA SPA solo vende por cajas de 24 unidades No existen ventas sueltas
+        Si el texto no indica si son unidades o cajas pero el número es múltiplo de 24 interpreta como unidades y divide por 24
+
+        Ejemplos
+        48 unidades de chocolate pink equivale a 2 cajas de pink
+        24 cajas de chocolate amargo equivale a 24 cajas de amargo
+        96 uds de leche equivale a 4 cajas de leche
+        23 unidades de chocolate pink equivale a 0 cajas
+        24 x 24 unidades equivale a 24 cajas
+        2 cajas de chocolate amargo equivale a 2 cajas de amargo
+
+        Output
+        Debes entregar únicamente los siguientes valores como respuesta final en formato numérico entero por separado
+
+        Pedido_Cantidad_Pink
+        Pedido_Cantidad_Amargo
+        Pedido_Cantidad_Leche
         
         Para la variable rut debes considerar lo siguiente:
         -Puede tener los siguientes formatos:
