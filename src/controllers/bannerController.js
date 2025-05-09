@@ -5,7 +5,11 @@ const client = new OpenAI({
 });
 
 const BANNED_BUSINESS = [
-    "del pedregal"
+    "del pedregal",
+    "COMERCIAL QUINTO CENTRO",
+    "COMERCIAL QUINTO CENTRO SPA.",
+    "QUINTO CENTRO",
+    "QUINTO CENTRO SPA",
 ]
 
 async function checkifBusinessIsBanned (req,res){
@@ -42,8 +46,7 @@ async function checkifBusinessIsBanned (req,res){
         {
             "business": "nombre de la empresa",
             "banned": false
-        }
-        `;
+        } no quiero explicaciones ni nada mas, solo el json`;
 
         const userPrompt = `este es el texto que debes analizar:
         este es el contenido del correo: ${emailContent}
