@@ -31,7 +31,7 @@ async function checkifBusinessIsBanned (req,res){
             return res.status(400).json({ error: 'Invalid request body' });
         }
 
-        const systemPrompt = `Debes buscar dentro de un texto la empresa a la que pertenece el correo entrante en base a esta lista ${BANNED_BUSINESS},
+        const systemPrompt = `busca dentro de esta lista ${BANNED_BUSINESS} si el correo pertenece a una empresa de la lista,
         si el correo pertenece a una empresa de la lista debes devolver un json con el siguiente formato: 
         {
             "business": "nombre de la empresa",
