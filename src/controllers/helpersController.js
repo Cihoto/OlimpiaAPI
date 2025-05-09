@@ -283,6 +283,9 @@ async function readEmailBody(req, res) {
             rutIsFound = true
         }
 
+        console.log("****************************************RUT IS FOUND *************************************************");
+        console.log("rutIsFound", rutIsFound);
+
 
         // if(!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
         if(rutIsFound == false){ 
@@ -459,6 +462,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
                         return;
                     }
 
+                    console.log("1")
 
                     if (results.length == 1) {
                         const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho']);
@@ -476,6 +480,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
                         });
                         return;
                     }
+                    console.log("2")
 
                     if (!address) {
                         const first = results[0];
@@ -489,7 +494,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
                         });
                         return;
                     }
-
+                    console.log("3")
                     if(isDelivery == false && results.length > 1){
                         results[0]['deliveryDay'] = "";
                         resolve({
@@ -510,12 +515,12 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery) {
                     });
 
                     const gptResponse = await integrateWithChatGPT(clientData, address); // Integrate with ChatGPT
-                    console.log(gptResponse);
+                    console.log({gptResponse});
 
                     if (gptResponse.length == 0) {
                         resolve({
                             data: gptResponse,
-                            length: gptResponse.length,
+                            length: clientData.length,
                             address: address ? true : false,
                             boxPriceIsEqual: false
                         });
