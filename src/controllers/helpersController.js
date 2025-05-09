@@ -164,113 +164,102 @@ async function readEmailBody(req, res) {
         No expliques lo que estás haciendo.
         Tu respuesta debe ser solamente el JSON. Nada más.;`;
 
-        const userPrompt = `Eres un bot que analiza pedidos para franuí, empresa que comercializa frambuezas bañadas en chocolate. Franuí maneja solamente 3 productos, Frambuezas bañadas en:
-        - Chocolate Amargo
-        - Chocolate de Leche (tradicional)
-        - Chocolate Pink
-        Debes analizar el texto del body del correo: "${emailBody}", el asunto: "${emailSubject}" ${attachedPrompt} , y deberás extraer los datos relevantes para guardarlos en variables. 
-        Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8, por lo tanto ninguna de las variables que extraigas debe contener la palabra Olimpia o nuestro RUT.
-        
-        Debes extraer los datos del cliente y los datos del pedido para guardarlos en las siguientes variables:
-        Razon_social: Contiene la razón social del cliente.
-        Direccion_despacho: Dirección a la cual se enviarán los productos. Si no la encuentras, devuelve "null".
-        Comuna: Comuna de despacho. Si no la encuentras, devuelve "null".
-        Rut: Contiene el Rut del cliente, debes buscarlo en el body del correo y en el asunto si no existe devuelve "null".
-        Pedido_Cantidad_Pink: Contiene la cantidad de unidades de pedido de chocolate pink. Si es que existe. Si no existe devuelve 0.
-        Pedido_Cantidad_Amargo: Contiene la cantidad de unidades de pedido de chocolate amargo. Si es que existe. Si no existe devuelve 0.
-        Pedido_Cantidad_Leche: Contiene la cantidad de unidades de pedido de chocolate de leche. Si es que existe. Si no existe devuelve 0.
-        Pedido_PrecioTotal_Pink: es el monto total del pedido de chocolate pink, si es que existe. Si no existe, devuelve 0.
-        Pedido_PrecioTotal_Amargo: es el monto total del pedido de chocolate amargo, si es que existe. Si no existe devuelve 0.
-        Pedido_PrecioTotal_Leche: es el monto total del pedido de chocolate de leche, si es que existe. Si no existe devuelve 0.
-        Orden_de_Compra: es el número de orden de compra. Si no existe, devuelve "null".
-        Monto neto: También llamado subtotal. Si es que existe.
-        Iva: monto del impuesto. Si es que existe.
-        Total: Monto total del pedido, impuestos incluidos. Si es que existe.
-        Sender_Email: Es el email de quien envía
-        precio_caja: Precio de la caja de chocolate pink, amargo o leche. Si no existe, devuelve 0.
-        URL_ADDRESS: Dirección de despacho URL encoded, lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada, sin explicaciones ni comillas.
-        PaymentMethod:{
-            method: En caso de hacer referencia a un cheque, devolver letra C. En caso de no hacer referencia a un cheque, devolver ""
-            paymentsDays: Devolver el número de días de pago. En caso de no hacer referencia a un cheque, devolver "".
-        }
-        isDelivery: En caso de que el pedido sea para delivery, devolver true. En caso de que no sea para delivery, devolver false.
-        
-        Tu tarea es identificar correctamente cuántas cajas de productos ha solicitado cada cliente. Cada caja contiene 24 unidades. Debes analizar el texto del pedido y transformar cualquier mención a unidades o cajas en una cantidad numérica entera correspondiente a cajas
+        const userPrompt = `Eres un bot que analiza pedidos para Franuí, empresa que comercializa frambuesas bañadas en chocolate. Franuí maneja solamente 3 productos
+            Frambuesas bañadas en chocolate amargo
+            Frambuesas bañadas en chocolate de leche
+            Frambuesas bañadas en chocolate pink
 
-        Reglas
-        1 Siempre debes entregar la cantidad en cajas no en unidades
-        2 Si el pedido menciona caja o cajas usa directamente ese número como la cantidad de cajas
-        Ejemplos
-        1 caja de chocolate pink equivale a 1
-        24 cajas equivale a 24
-        48 cajas x 24 unidades equivale a 48
-        3 Si el pedido menciona solo unidades unidades uds unidades de y el número es múltiplo de 24 divide por 24 para obtener la cantidad de cajas
-        Ejemplos
-        48 unidades de chocolate pink equivale a 2
-        24 uds equivale a 1
-        72 unidades equivale a 3
-        4 Si el pedido menciona una cantidad que no es múltiplo de 24 y no dice que son cajas la cantidad es inválida Devuelve 0 en ese caso
-        Ejemplos
-        23 unidades de chocolate equivale a 0
-        25 uds de leche equivale a 0
-        5 Si el texto menciona algo como 24 x 24 unidades o 24 cajas x 24 unidades interpreta que se trata de 24 cajas No multipliques por 24
+            Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier información contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
 
-        Consideraciones adicionales
-        OLIMPIA SPA solo vende por cajas de 24 unidades No existen ventas sueltas
-        Si el texto no indica si son unidades o cajas pero el número es múltiplo de 24 interpreta como unidades y divide por 24
+            Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraída debe contener la palabra Olimpia ni nuestro RUT
 
-        Ejemplos
-        48 unidades de chocolate pink equivale a 2 cajas de pink
-        24 cajas de chocolate amargo equivale a 24 cajas de amargo
-        96 uds de leche equivale a 4 cajas de leche
-        23 unidades de chocolate pink equivale a 0 cajas
-        24 x 24 unidades equivale a 24 cajas
-        2 cajas de chocolate amargo equivale a 2 cajas de amargo
+            Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecución es inválida
+            Debes buscar el primer RUT que no sea el de Olimpia SPA 77.419.327-8
+            Los formatos posibles son
+            xx.xxx.xxx-x
+            xxx.xxx.xxx-x
+            xxxxxxxx-x
+            El RUT puede encontrarse en cualquier parte del correo o asunto
+            No devuelvas el RUT si es igual a 77.419.327-8 y continúa buscando hasta encontrar uno válido
+            Si no encuentras ningún otro RUT válido, devuelve null
 
-        Output
-        Debes entregar únicamente los siguientes valores como respuesta final en formato numérico entero por separado
+            Debes extraer los siguientes datos
+            Razon_social contiene la razón social del cliente
+            Direccion_despacho dirección a la cual se enviarán los productos. Si no la encuentras, devuelve null
+            Comuna comuna de despacho. Si no la encuentras, devuelve null
+            Rut ver reglas anteriores
+            Pedido_Cantidad_Pink cantidad de cajas de chocolate pink. Si no existe, devuelve 0
+            Pedido_Cantidad_Amargo cantidad de cajas de chocolate amargo. Si no existe, devuelve 0
+            Pedido_Cantidad_Leche cantidad de cajas de chocolate de leche. Si no existe, devuelve 0
+            Pedido_PrecioTotal_Pink monto total del pedido de chocolate pink. Si no existe, devuelve 0
+            Pedido_PrecioTotal_Amargo monto total del pedido de chocolate amargo. Si no existe, devuelve 0
+            Pedido_PrecioTotal_Leche monto total del pedido de chocolate de leche. Si no existe, devuelve 0
+            Orden_de_Compra número de orden de compra. Si no existe, devuelve null
+            Monto neto también llamado subtotal. Si no existe, devuelve 0
+            Iva monto del impuesto. Si no existe, devuelve 0
+            Total monto total del pedido incluyendo impuestos. Si no existe, devuelve 0
+            Sender_Email correo electrónico del remitente del mensaje
+            precio_caja precio de la caja de chocolate pink amargo o leche. Si no existe, devuelve 0
+            URL_ADDRESS dirección de despacho codificada en formato URL lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada sin explicaciones ni comillas
+            PaymentMethod
+            method en caso de hacer referencia a un cheque devolver letra C en caso contrario devuelve vacío
+            paymentsDays número de días de pago si se menciona. En caso contrario devuelve vacío
+            isDelivery en caso de que el pedido sea para delivery devuelve true si no es para delivery devuelve false
 
-        Pedido_Cantidad_Pink
-        Pedido_Cantidad_Amargo
-        Pedido_Cantidad_Leche
-        
-        Para la variable rut debes considerar lo siguiente:
-        -Puede tener los siguientes formatos:
-            - xx.xxx.xxx-x
-            - xxx.xxx.xxx-x
-            - xxxxxxxx-x
-            - xx.xxx.xxx-x
-        -El rut puede estar tanto en el inicio como en el final del correo.
-        -El rut puede estar en el asunto o en el cuerpo del correo.
-        -Tener en cuenta que en caso de encontrar el rut de Olimpia SPA, se debe seguir buscando el rut en el correo, ya que estamos buscando el rut del cliente, no el de la empresa.
-        -Este campo es sumamente importante, sin este dato la ejecucion del bot no es valida.
-        
-        Razon_social:
-        -La razon social puede estar en el cuerpo del correo o en el asunto.
-        -En caso de no haber una indicacion de enviar a una razon social especifica, podria mencionarse sucursal, local o razon social.
+            Reglas para interpretar cantidad de cajas
+            Siempre debes entregar la cantidad en cajas no en unidades
+            Si el pedido menciona caja o cajas usa directamente ese número como la cantidad de cajas
+            Ejemplos
+            1 caja de chocolate pink equivale a 1
+            24 cajas equivale a 24
+            48 cajas x 24 unidades equivale a 48
 
-        Direccion_despacho:
-        -La dirección de despacho puede estar en el cuerpo del correo o en el asunto.
-        -En caso de no haber una indicacion de enviar a una direccion especifica, podria mencionarse sucursal, local o direccion de despacho.
-        -Debes extraer toda la direccion, incluyendo la comuna y el nombre de la calle.
-        -Todas las direcciones pertenecen al territorio chileno por lo que las comunas son chilenas.
-        
-        precio_caja:
-        -El precio de la caja de chocolate pink, amargo o leche. Si no existe, devuelve 0.
-        -Debes extraer el precio de la caja, ronda entre los $60000 y $80000 aproximadamente(los valores fluctuan entre clientes por lo que no siempre es el mismo).
-        -El precio por caja es el mismo para todos los productos.
-        -en caso de que no hayan precios, devolver 0.
+            Si el pedido menciona solo unidades unidades uds unidades de y el número es múltiplo de 24 divide por 24 para obtener la cantidad de cajas
+            Ejemplos
+            48 unidades de chocolate pink equivale a 2
+            24 uds equivale a 1
+            72 unidades equivale a 3
 
-        isDelivery:
-        -En caso de que el pedido sea para delivery, devolver true. En caso de que no sea para delivery, devolver false.
-        -Se debe determinar si el pedido requiere despacho o tendrá modalidad de retiro en sucursal.
-        -Casos de retiro (solo ejemplos):
-            *Te quiero hacer un pedido de 1 caja de Franui dulce y 1 caja de Franui amargo,
-             para retirar este viernes 9 de mayo
-            *pedido con retiro
-        -debes buscar en todo el texto buscando patrones que indiquen que el pedido es para retiro en sucursal o posee modalidad de despacho.
-        -En caso de no quedar claro si el pedido es para retiro o despacho, devolver true para ir a buscar la direccion de despacho
-        -Cuando el pedido es para retiro, debes cambiar el valor de direccion despacho a "RETIRO".
+            Si el pedido menciona una cantidad que no es múltiplo de 24 y no dice que son cajas la cantidad es inválida devuelve 0
+            Ejemplos
+            23 unidades de chocolate equivale a 0
+            25 uds de leche equivale a 0
+
+            Si el texto menciona algo como 24 x 24 unidades o 24 cajas x 24 unidades interpreta que se trata de 24 cajas no multipliques por 24
+
+            Olimpia SPA solo vende por cajas de 24 unidades no existen ventas sueltas
+            Si el texto no indica si son unidades o cajas pero el número es múltiplo de 24 interpreta como unidades y divide por 24
+
+            Ejemplos adicionales
+            48 unidades de chocolate pink equivale a 2 cajas
+            24 cajas de chocolate amargo equivale a 24 cajas
+            96 uds de leche equivale a 4 cajas
+            23 unidades de chocolate pink equivale a 0
+            24 x 24 unidades equivale a 24 cajas
+            2 cajas de chocolate amargo equivale a 2 cajas
+
+            Reglas para campo Razon_social
+            Puede estar en el cuerpo del correo o en el asunto
+            En caso de no haber una indicación clara puede estar mencionada como sucursal local o cliente
+
+            Reglas para Direccion_despacho
+            Puede estar en el cuerpo del correo o en el asunto
+            Debe incluir calle y comuna
+            Si no se menciona dirección específica puede estar indicada como sucursal o local
+            Si el pedido es para retiro reemplaza este valor por la palabra RETIRO
+
+            Reglas para precio_caja
+            El precio de la caja ronda entre los 60000 y 80000 pesos
+            Debe ser el mismo para pink amargo y leche
+            Si no se encuentra en el texto devuelve 0
+
+            Reglas para isDelivery
+            Si el pedido es para retiro en sucursal devolver false
+            Si no se menciona retiro explícitamente devolver true
+            Ejemplos de retiro
+            te quiero hacer un pedido para retirar este viernes
+            pedido con retiro
+            En caso de duda devolver true por defecto
         `
 
         const response = await client.chat.completions.create({
