@@ -73,7 +73,6 @@ async function createBill(req, res) {
         bill.isTransferDocument = body.isTransferDocument;
         bill.deliveryDay = body.deliveryDay ? body.deliveryDay : null;
 
-
         bill.validate();
         const BILLJSON = await bill.toJSON();
         const filePath = path.resolve('./src/controllers/bills.json');
