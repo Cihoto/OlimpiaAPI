@@ -1975,5 +1975,221 @@
     "gloss": "balmoral 309 local 12",
     "customFields": [],
     "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250509231925",
+    "emissionDate": {
+      "day": "5",
+      "month": "5",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "4",
+      "month": "6",
+      "year": "2025"
+    },
+    "clientFile": "76.587.878-0",
+    "contactIndex": "Hernando de Aguirre 136. Providencia",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FJAMIS",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "Providencia",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 24,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 78000,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 24,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 78000,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "hernando de aguirre 136",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250509231943",
+    "emissionDate": {
+      "day": "5",
+      "month": "5",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "4",
+      "month": "6",
+      "year": "2025"
+    },
+    "clientFile": "76.587.878-0",
+    "contactIndex": "Hernando de Aguirre 136. Providencia",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FJAMIS",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "Providencia",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 1,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 78000,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 1,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 78000,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "hernando de aguirre 136",
+    "customFields": [],
+    "isTransferDocument": false
   }
 ]

@@ -17,6 +17,9 @@ import bannerRoutes from './src/routes/bannerRouter.js';
 import { fileURLToPath } from 'url';
 import moment from 'moment';
 
+import findDeliveryDayByComuna from './src/utils/findDeliveryDate.js'; // Import the function
+moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
+
 const app = express();
 dotenv.config();
 
@@ -28,25 +31,20 @@ app.use(morgan('dev'));
 app.use(cors());
 
 // Auth middleware
-app.use(authMiddleware);
+// app.use(authMiddleware);
 
 app.use('/api',billsRoutes);
 app.use('/helpers',helpersRoutes);
-app.use('/bot',botRoutes)
-
-
-
+app.use('/bot',botRoutes);
 app.use('/dev',devRoutes);
 
 // app.use('/google',googleRoutes)
 // Routes
 app.get('/', async (req, res) => {
 
-
-  const date = "5 de mayo del 2025";
-  const formattedDate = moment(date, "D [de] MMMM [del] YYYY", "es").format("YYYY-MM-DD");
-  res.json({ formattedDate });
-
+  const communityResponse =  findDeliveryDayByComuna("Vitacura","2025-05-05T11:00:01Z");
+  console.log("communityResponse", communityResponse);
+  res.json(communityResponse);
 
   return 
 

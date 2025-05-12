@@ -4,7 +4,7 @@ import OpenAI from 'openai';
 import moment from 'moment';
 import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
-
+import {analyzeOrderEmail} from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 const client = new OpenAI();
 
 const CSV = './src/documents/KNOWLEDGEBASE.csv'; // Use the file path as a string
@@ -133,6 +133,10 @@ async function readEmailBody(req, res) {
         const {emailBody, emailSubject, emailAttached, emailDate} = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
         console.log(JSON.parse(sanitizedEmailBody));
+
+        // res.json({analyzeOrderEmail});
+        // return
+            
         // if (emailBody == null || emailSubject == null || emailAttached == null) {
         //     console.log("Invalid request emailBody:", emailBody);
         //     console.log("Invalid request emailSubject:", emailSubject);
@@ -189,9 +193,9 @@ async function readEmailBody(req, res) {
             Comuna comuna de despacho. Si no la encuentras, devuelve null
             Rut ver reglas anteriores
             Pedido_Cantidad_Pink cantidad de cajas de chocolate pink. Si no existe, devuelve 0
-            Pedido_Cantidad_Amargo cantidad de cajas de chocolate amargo. Si no existe, devuelve 0
-            Pedido_Cantidad_Leche cantidad de cajas de chocolate de leche. Si no existe, devuelve 0
-            Pedido_PrecioTotal_Pink monto total del pedido de chocolate pink. Si no existe, devuelve 0
+            Pedido_Cantidad_Amargo: devuelve 0
+            Pedido_Cantidad_Leche: devuelve 0
+            Pedido_PrecioTotal_Pink: devuelve 0
             Pedido_PrecioTotal_Amargo monto total del pedido de chocolate amargo. Si no existe, devuelve 0
             Pedido_PrecioTotal_Leche monto total del pedido de chocolate de leche. Si no existe, devuelve 0
             Orden_de_Compra número de orden de compra. Si no existe, devuelve null
@@ -205,38 +209,6 @@ async function readEmailBody(req, res) {
             method en caso de hacer referencia a un cheque devolver letra C en caso contrario devuelve vacío
             paymentsDays número de días de pago si se menciona. En caso contrario devuelve vacío
             isDelivery en caso de que el pedido sea para delivery devuelve true si no es para delivery devuelve false
-
-            Reglas para interpretar cantidad de cajas
-            Siempre debes entregar la cantidad en cajas no en unidades
-            Si el pedido menciona caja o cajas usa directamente ese número como la cantidad de cajas
-            Ejemplos
-            1 caja de chocolate pink equivale a 1
-            24 cajas equivale a 24
-            48 cajas x 24 unidades equivale a 48
-
-            Si el pedido menciona solo unidades unidades uds unidades de y el número es múltiplo de 24 divide por 24 para obtener la cantidad de cajas
-            Ejemplos
-            48 unidades de chocolate pink equivale a 2
-            24 uds equivale a 1
-            72 unidades equivale a 3
-
-            Si el pedido menciona una cantidad que no es múltiplo de 24 y no dice que son cajas la cantidad es inválida devuelve 0
-            Ejemplos
-            23 unidades de chocolate equivale a 0
-            25 uds de leche equivale a 0
-
-            Si el texto menciona algo como 24 x 24 unidades o 24 cajas x 24 unidades interpreta que se trata de 24 cajas no multipliques por 24
-
-            Olimpia SPA solo vende por cajas de 24 unidades no existen ventas sueltas
-            Si el texto no indica si son unidades o cajas pero el número es múltiplo de 24 interpreta como unidades y divide por 24
-
-            Ejemplos adicionales
-            48 unidades de chocolate pink equivale a 2 cajas
-            24 cajas de chocolate amargo equivale a 24 cajas
-            96 uds de leche equivale a 4 cajas
-            23 unidades de chocolate pink equivale a 0
-            24 x 24 unidades equivale a 24 cajas
-            2 cajas de chocolate amargo equivale a 2 cajas
 
             Reglas para campo Razon_social
             Puede estar en el cuerpo del correo o en el asunto
@@ -259,7 +231,7 @@ async function readEmailBody(req, res) {
             Ejemplos de retiro
             te quiero hacer un pedido para retirar este viernes
             pedido con retiro
-            En caso de duda devolver true por defecto
+            En caso de duda devolver true por defecto
         `
 
         const response = await client.chat.completions.create({
@@ -287,6 +259,12 @@ async function readEmailBody(req, res) {
         }else{
             rutIsFound = true
         }
+
+        const analyzeOrderEmaiResponse = await analyzeOrderEmail(sanitizedEmailBody);
+        console.log("analyzeOrderEmaiResponse", analyzeOrderEmaiResponse);
+        validJson.Pedido_Cantidad_Pink = analyzeOrderEmaiResponse.Pedido_Cantidad_Pink;
+        validJson.Pedido_Cantidad_Amargo = analyzeOrderEmaiResponse.Pedido_Cantidad_Amargo;
+        validJson.Pedido_Cantidad_Leche = analyzeOrderEmaiResponse.Pedido_Cantidad_Leche;
 
         console.log("****************************************RUT IS FOUND *************************************************");
         console.log("rutIsFound", rutIsFound);

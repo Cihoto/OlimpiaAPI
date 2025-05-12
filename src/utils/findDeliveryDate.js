@@ -6,131 +6,301 @@
 
 
 import moment from 'moment-timezone'; // Import moment-timezone for timezone support
+import { isFileLike } from 'openai/uploads.mjs';
 moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
 
-function findDeliveryDayByComuna(comunaToSearch,emailDate){
+const uniqueCommunities = [
+    "SANTIAGO CENTRO",
+    "LAS CONDES",
+    "PROVIDENCIA",
+    "ÑUÑOA",
+    "VITACURA",
+    "LO BARNECHEA",
+    "ESTACIÓN CENTRAL",
+    "RECOLETA",
+    "COLINA",
+    "HUECHURABA",
+    "INDEPENDENCIA",
+    "QUILICURA",
+    "LO ESPEJO",
+    "MAIPÚ",
+    "SAN BERNARDO",
+    "LA FLORIDA",
+    "PEÑALOLÉN",
+    "SAN MIGUEL",
+    "EL BOSQUE",
+    "LA REINA",
+    "LA CISTERNA",
+    "CERRILLOS",
+    "MACUL"
+]
 
-    console.log("comunaToSearch", comunaToSearch.toLowerCase());
+const deliveryDays = [
+    {
+        index: 1,
+        dayName: "LUNES",
+        communities: [
+            "SANTIAGO CENTRO",
+            "LAS CONDES",
+            "PROVIDENCIA",
+            "ÑUÑOA",
+            "VITACURA",
+            "LO BARNECHEA",
+            "ESTACIÓN CENTRAL",
+            "RECOLETA",
+            "COLINA",
+            "HUECHURABA",
+            "INDEPENDENCIA",
+            "QUILICURA"
+        ]
+    },
+    {
+        index: 2,
+        dayName: "MARTES",
+        communities: [
+            "LO ESPEJO",
+            "MAIPÚ",
+            "SAN BERNARDO",
+            "LA FLORIDA",
+            "PEÑALOLÉN",
+            "SAN MIGUEL",
+            "EL BOSQUE",
+            "LA REINA",
+            "PROVIDENCIA",
+            "LAS CONDES",
+            "VITACURA",
+            "LA CISTERNA",
+            "CERRILLOS",
+            "MACUL",
+            "ÑUÑOA"
+        ]
+    },
+    {
+        index: 3,
+        dayName: "MIÉRCOLES",
+        communities: [
+            "SANTIAGO CENTRO",
+            "LAS CONDES",
+            "PROVIDENCIA",
+            "ÑUÑOA",
+            "VITACURA",
+            "LO BARNECHEA",
+            "ESTACIÓN CENTRAL",
+            "RECOLETA",
+            "COLINA",
+            "HUECHURABA",
+            "INDEPENDENCIA",
+            "QUILICURA"
+        ]
+    },
+    {
+        index: 4,
+        dayName: "JUEVES",
+        communities: [
+            "LO ESPEJO",
+            "MAIPÚ",
+            "SAN BERNARDO",
+            "LA FLORIDA",
+            "PEÑALOLÉN",
+            "SAN MIGUEL",
+            "EL BOSQUE",
+            "LA REINA",
+            "PROVIDENCIA",
+            "LAS CONDES",
+            "VITACURA",
+            "LA CISTERNA",
+            "CERRILLOS",
+            "MACUL",
+            "ÑUÑOA"
+        ]
+    },
+    {
+        index: 5,
+        dayName: "VIERNES",
+        communities: [
+            "SANTIAGO CENTRO",
+            "LAS CONDES",
+            "PROVIDENCIA",
+            "ÑUÑOA",
+            "VITACURA",
+            "LO BARNECHEA",
+            "ESTACIÓN CENTRAL",
+            "RECOLETA",
+            "COLINA",
+            "HUECHURABA",
+            "INDEPENDENCIA",
+            "QUILICURA"
+        ]
+    }
+];
 
-    const formattedDate = moment(emailDate).format("YYYY/MM/DD");
+function findDeliveryDayByComuna(comunaToSearch, emailDate) {
+
+    // const todayWeekDayIndex = moment().day(); // Obtiene el índice del día de la semana (0 para domingo, 1 para lunes, etc.)
+    // Obtiene el índice del día de la semana de la fecha del correo electrónico
+    // Obtiene la hora de la fecha del correo electrónico
 
 
-    if(!comunaToSearch || typeof comunaToSearch !== 'string') {
+    const formattedDate = moment(emailDate).format("YYYY/MM/DD HH:mm:ss");
+
+
+    if (!comunaToSearch || typeof comunaToSearch !== 'string') {
         return null; // Invalid input
     }
     console.log("comunaToSearch 2", comunaToSearch);
-    const deliveryDays = [
-        { "comuna": "SANTIAGO CENTRO", "dia": "LUNES" },
-        { "comuna": "LAS CONDES", "dia": "LUNES" },
-        { "comuna": "PROVIDENCIA", "dia": "LUNES" },
-        { "comuna": "ÑUÑOA", "dia": "LUNES" },
-        { "comuna": "VITACURA", "dia": "LUNES" },
-        { "comuna": "LO BARNECHEA", "dia": "LUNES" },
-        { "comuna": "ESTACIÓN CENTRAL", "dia": "LUNES" },
-        { "comuna": "RECOLETA", "dia": "LUNES" },
-        { "comuna": "COLINA", "dia": "LUNES" },
-        { "comuna": "HUECHURABA", "dia": "LUNES" },
-        { "comuna": "INDEPENDENCIA", "dia": "LUNES" },
-        { "comuna": "QUILICURA", "dia": "LUNES" },
-        { "comuna": "LO ESPEJO", "dia": "MARTES" },
-        { "comuna": "MAIPÚ", "dia": "MARTES" },
-        { "comuna": "SAN BERNARDO", "dia": "MARTES" },
-        { "comuna": "LA FLORIDA", "dia": "MARTES" },
-        { "comuna": "PEÑALOLÉN", "dia": "MARTES" },
-        { "comuna": "SAN MIGUEL", "dia": "MARTES" },
-        { "comuna": "EL BOSQUE", "dia": "MARTES" },
-        { "comuna": "LA REINA", "dia": "MARTES" },
-        { "comuna": "PROVIDENCIA", "dia": "MARTES" },
-        { "comuna": "LAS CONDES", "dia": "MARTES" },
-        { "comuna": "VITACURA", "dia": "MARTES" },
-        { "comuna": "LA CISTERNA", "dia": "MARTES" },
-        { "comuna": "CERRILLOS", "dia": "MARTES" },
-        { "comuna": "MACUL", "dia": "MARTES" },
-        { "comuna": "ÑUÑOA", "dia": "MARTES" },
-        { "comuna": "SANTIAGO CENTRO", "dia": "MIÉRCOLES" },
-        { "comuna": "LAS CONDES", "dia": "MIÉRCOLES" },
-        { "comuna": "PROVIDENCIA", "dia": "MIÉRCOLES" },
-        { "comuna": "ÑUÑOA", "dia": "MIÉRCOLES" },
-        { "comuna": "VITACURA", "dia": "MIÉRCOLES" },
-        { "comuna": "LO BARNECHEA", "dia": "MIÉRCOLES" },
-        { "comuna": "ESTACIÓN CENTRAL", "dia": "MIÉRCOLES" },
-        { "comuna": "RECOLETA", "dia": "MIÉRCOLES" },
-        { "comuna": "COLINA", "dia": "MIÉRCOLES" },
-        { "comuna": "HUECHURABA", "dia": "MIÉRCOLES" },
-        { "comuna": "INDEPENDENCIA", "dia": "MIÉRCOLES" },
-        { "comuna": "LO ESPEJO", "dia": "JUEVES" },
-        { "comuna": "MAIPÚ", "dia": "JUEVES" },
-        { "comuna": "SAN BERNARDO", "dia": "JUEVES" },
-        { "comuna": "LA FLORIDA", "dia": "JUEVES" },
-        { "comuna": "PEÑALOLÉN", "dia": "JUEVES" },
-        { "comuna": "SAN MIGUEL", "dia": "JUEVES" },
-        { "comuna": "EL BOSQUE", "dia": "JUEVES" },
-        { "comuna": "LA REINA", "dia": "JUEVES" },
-        { "comuna": "PROVIDENCIA", "dia": "JUEVES" },
-        { "comuna": "LAS CONDES", "dia": "JUEVES" },
-        { "comuna": "VITACURA", "dia": "JUEVES" },
-        { "comuna": "LA CISTERNA", "dia": "JUEVES" },
-        { "comuna": "CERRILLOS", "dia": "JUEVES" },
-        { "comuna": "MACUL", "dia": "JUEVES" },
-        { "comuna": "ÑUÑOA", "dia": "JUEVES" },
-        { "comuna": "SANTIAGO CENTRO", "dia": "VIERNES" },
-        { "comuna": "LAS CONDES", "dia": "VIERNES" },
-        { "comuna": "PROVIDENCIA", "dia": "VIERNES" },
-        { "comuna": "ÑUÑOA", "dia": "VIERNES" },
-        { "comuna": "VITACURA", "dia": "VIERNES" },
-        { "comuna": "LO BARNECHEA", "dia": "VIERNES" },
-        { "comuna": "ESTACIÓN CENTRAL", "dia": "VIERNES" },
-        { "comuna": "RECOLETA", "dia": "VIERNES" },
-        { "comuna": "COLINA", "dia": "VIERNES" },
-        { "comuna": "HUECHURABA", "dia": "VIERNES" },
-        { "comuna": "INDEPENDENCIA", "dia": "VIERNES" },
-        { "comuna": "QUILICURA", "dia": "VIERNES" }
-    ];
 
 
-    const matchingDeliveries = deliveryDays.filter((delivery) => {
+    // Check if the comunaToSearch is in the list of unique communities
+    const isValidCommunity = uniqueCommunities.find(community => {
         const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-        return normalize(delivery.comuna) === normalize(comunaToSearch);
+        return normalize(community) === normalize(comunaToSearch);
     });
 
-    console.log("matchingDeliveries", matchingDeliveries);
+    if (!isValidCommunity) {
+        return null; // Invalid community
+    }
 
-    if (matchingDeliveries.length > 0) {
-        const referenceDate = moment(formattedDate, 'YYYY-MM-DD');
-        console.log("referenceDate", referenceDate.format('YYYY-MM-DD HH:mm:ss'));
-        const cutoffHour = 8; // 12 AM cutoff time
-        const daysOfWeek = ["DOMINGO", "LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
-        let closestDate = null;
-        let minDaysUntilNextTarget = Infinity;
-
-        matchingDeliveries.forEach((delivery) => {
-            const targetDay = delivery.dia.toUpperCase();
-            const targetDayIndex = daysOfWeek.indexOf(targetDay);
-
-            if (targetDayIndex !== -1) {
-                let daysUntilNextTarget = (targetDayIndex - referenceDate.isoWeekday() + 7) % 7;
-
-                // If the target day is today and the current time is before the cutoff hour
-                if (daysUntilNextTarget === 0 && referenceDate.hour() < cutoffHour) {
-                    closestDate = referenceDate.format('YYYY-MM-DD');
-                    minDaysUntilNextTarget = 0; // No need to check further
-                } else if (daysUntilNextTarget > 0 || referenceDate.hour() >= cutoffHour) {
-                    if (daysUntilNextTarget === 0) {
-                        daysUntilNextTarget = 7; // Move to the next week's target day
-                    }
-                    if (daysUntilNextTarget < minDaysUntilNextTarget) {
-                        minDaysUntilNextTarget = daysUntilNextTarget;
-                        closestDate = referenceDate.clone().add(daysUntilNextTarget, 'days').format('YYYY-MM-DD');
-                    }
-                }
+    // Find all indexes of the delivery days that match the comunaToSearch
+    const deliveryDayIndexes = deliveryDays
+        .filter(day => day.communities.some(community => {
+            const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+            return normalize(community) === normalize(comunaToSearch);
+        }))
+        .map(day => {
+            return {
+                index: day.index,
+                dayName: day.dayName
             }
         });
 
-        return closestDate;
-    } else {
-        return null; // or handle the case when no match is found
+    deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
+    let deliveryIndex = null;
+
+    const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
+    const emailDateHour = moment.utc(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').hour();
+    const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
+
+    //encontrar el proximo indice de entrega
+    for (let i = 0; i < deliveryDayIndexes.length; i++) {
+        // console.log("deliveryDayIndexes", deliveryDayIndexes[i]);
+        const deliveryDayIndex = deliveryDayIndexes[i].index;
+
+        if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
+            console.log("??????????????????????????????????????????????????????????????????????????")
+            deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
+            break;
+        }
+
+
+        if (deliveryDayIndex > emailDateDayIndex) {
+
+            deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
+            break;
+            console.log(deliveryDayIndex, ">>>>>>>>>>>>>>>>", emailDateDayIndex)
+            console.log("***********************************************************************************")
+            const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
+
+            // deliveryIndex = daysToNextDelivery;
+            // break
+
+            if (daysToNextDelivery > 1) {
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                break;
+            }
+
+            if (emailDateHour >= 12) {
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+            } else {
+                console.log({ emailDateHour })
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+            }
+
+            break;
+        }
+
+        if (emailDateDayIndex == 5) {
+            console.log("________________________________________________________________________________")
+
+            deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
+            break;
+            const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
+
+            // deliveryIndex = daysToNextDelivery;
+            // break;
+            if (daysToNextDelivery > 1) {
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                break;
+            }
+            if (emailDateHour >= 12) {
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+            } else {
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+            }
+            break;
+        }
+
     }
-    
+
+    // Get the day name using the deliveryIndex
+    const deliveryObj = deliveryDayIndexes[deliveryIndex]
+
+    // teniendo en cuenta deliveryObject.dayName que puede ser LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, buscar la fecha futura mas cercana que sea igual a la fecha de entrega teniendo como punto de partida la fecha del correo
+    let deliveryDate = null;
+    let date = emailDate;
+    // while (deliveryObj.index != deliveryDate || counter <= 10) {
+    // while (deliveryObj.index != deliveryDate || counter < 10) {
+    while (deliveryObj.index != deliveryDate) {
+        date = moment(date).add(1, 'day').format("YYYY-MM-DD");
+        const dayOfWeek = moment(date).day();
+        deliveryDate = dayOfWeek;
+    }
+    // const deliveryDate = moment(emailDate).day(deliveryObj.index).format("YYYY/MM/DD");
+    return date
+    // return {deliveryIndex, moment(deliveryIndex).format("YYYY/MM/DD HH:mm:ss")};
+}
+
+function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour) {
+    const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
+
+    // deliveryIndex = daysToNextDelivery;
+    // break
+
+    if (daysToNextDelivery > 1) {
+        return moveForward(deliveryDayIndexes.length, i, 0)
+        // break;
+    }
+
+    if (emailDateHour >= 12) {
+        return moveForward(deliveryDayIndexes.length, i, 1)
+    } else {
+        // console.log({ emailDateHour })
+        return  moveForward(deliveryDayIndexes.length, i, 0)
+    }
+}
+
+
+function moveForward(arrayLength, currentIndex, steps) {
+
+    if (steps == 0) {
+        return currentIndex;
+    }
+
+    const newIndex = (currentIndex + steps) % arrayLength;
+    return newIndex;
+}
+
+function diffToNextDeliveryDay(deliveryDayIndexes, nextIndex, orderDate) {
+
+    const nextDeliveryDay = deliveryDayIndexes[nextIndex % deliveryDayIndexes.length];
+    // Calculate the next delivery date in the future
+    let nextDeliveryDate = moment(orderDate).startOf('day');
+
+    while (nextDeliveryDate.day() !== nextDeliveryDay.index) {
+        nextDeliveryDate.add(1, 'day');
+    }
+
+    const difference = nextDeliveryDate.diff(moment(orderDate).startOf('day'), 'days');
+    return difference;
 }
 
 // module.exports = findDeliveryDayByComuna; // Replace export default

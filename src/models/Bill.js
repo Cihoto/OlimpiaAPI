@@ -1,5 +1,4 @@
 import moment from 'moment';
-import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 
 class Bill {
     constructor({
@@ -159,6 +158,13 @@ class Bill {
             const saleTaxes = await this.#getSaleTaxes(businessAnalysis.businessAnalysis.taxeAnalysis);
             const globalDiscount = this.#getGlobalDiscount();
             const uniqueCode = moment().format("YYYYMMDDHHmmss");
+
+            let total = 0
+            this.details.forEach((detail) => {
+                let sum = detail.price * detail.quantity;
+                total += sum;
+            })
+
             return {
                 documentType: this.documentType,
                 firstFolio: this.firstFolio,
@@ -187,7 +193,7 @@ class Bill {
                 ventaRecDesGlobal: globalDiscount,
                 gloss: this.gloss,
                 customFields: [],
-                isTransferDocument: this.isTransferDocument
+                isTransferDocument: total >= 1600000 ? true : false,
             };
         } catch (error) {
             if (error.code && error.message) {
@@ -385,7 +391,6 @@ class Bill {
 
         const deliveryDay = this.deliveryDay ? moment(this.deliveryDay, "YYYY-MM-DD") : null;
 
-        // findDeliveryDayByComuna(this.deliveryDay)
         if(deliveryDay && deliveryDay.isValid()){
             return {
                 day: deliveryDay.format('D'),

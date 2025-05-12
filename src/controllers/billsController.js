@@ -157,7 +157,6 @@ async function createBill(req, res) {
 }
 async function getBillById(req, res) {
     if(!req.apiKey) {
-    
         res.status(401).json({code:401, error: 'Error al autenticar solicitud' });
         return;
     }
@@ -173,17 +172,12 @@ async function getBillById(req, res) {
         })
 
         const checkIssuedBillResponse = await checkIssuedBill.json();
-
         console.log("checkIssuedBillResponse", checkIssuedBillResponse);
-
         res.json(checkIssuedBillResponse);
-
 
     } catch (error) {
         console.log (error);
-        
         return res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error' });
-        
     }
 }
 
