@@ -186,8 +186,9 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const deliveryDayIndex = deliveryDayIndexes[i].index;
 
         if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
-            console.log("??????????????????????????????????????????????????????????????????????????")
-            deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
+            // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
+            deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+
             break;
         }
 
@@ -222,15 +223,15 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             console.log("________________________________________________________________________________")
 
             deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
-            break;
+            // break;
             const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
 
             // deliveryIndex = daysToNextDelivery;
             // break;
-            if (daysToNextDelivery > 1) {
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                break;
-            }
+            // if (daysToNextDelivery > 1) {
+            //     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+            //     break;
+            // }
             if (emailDateHour >= 12) {
                 deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
             } else {
@@ -238,6 +239,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             }
             break;
         }
+       
 
     }
 

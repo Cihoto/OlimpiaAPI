@@ -31,7 +31,7 @@ app.use(morgan('dev'));
 app.use(cors());
 
 // Auth middleware
-// app.use(authMiddleware);
+app.use(authMiddleware);
 
 app.use('/api',billsRoutes);
 app.use('/helpers',helpersRoutes);
@@ -42,7 +42,11 @@ app.use('/dev',devRoutes);
 // Routes
 app.get('/', async (req, res) => {
 
-  const communityResponse =  findDeliveryDayByComuna("Vitacura","2025-05-05T11:00:01Z");
+  if(!req.apiKey) {
+    return res.status(500).json({ error: 'Error al autenticar la solicitud' });
+  }
+
+  const communityResponse =  findDeliveryDayByComuna("vitacura","2025-05-17T14:00:01Z");
   console.log("communityResponse", communityResponse);
   res.json(communityResponse);
 
