@@ -9,41 +9,24 @@ const BANNED_BUSINESS = [
     "COMERCIAL QUINTO CENTRO",
     "COMERCIAL QUINTO CENTRO SPA.",
     "QUINTO CENTRO",
-    "QUINTO CENTRO SPA",
+    "QUINTO CENTRO SPA"
 ]
 
 async function checkifBusinessIsBanned (req,res){
-    if(!req.apiKey) {
-        res.status(401).json({code:401, error: 'Error al autenticar solicitud' });
-        return;
-    }
+    // if(!req.apiKey) {
+    //     res.status(401).json({code:401, error: 'Error al autenticar solicitud' });
+    //     return;
+    // }
     try {
         const plainText = req.body;
 
-        plainText
-        .replaceAll(/\s+/g, ' ') // Remove all white spaces
-        .replaceAll(/"(?!\s*[:,}\]])/g, '') // Remove all " that do not correspond to a JSON
-        .replaceAll(/[^\w\s:{}[\],"]/g, '') // Remove all special characters except JSON valid ones
-        .trim(); // Trim leading and trailing spaces
-        const sanitizedEmailBody = JSON.stringify(plainText)
-        .replaceAll(/\s+/g, ' ') // Remove all white spaces
-        .replaceAll(/"(?!\s*[:,}\]])/g, '') // Remove all " that do not correspond to a JSON
-        .replaceAll(/[^\w\s:{}[\],"]/g, '') // Remove all special characters except JSON valid ones
-        .trim(); // Trim leading and trailing spaces
+        const sanitizedEmailBody = plainText.replace(/[^a-zA-Z0-9\s]/g, '');  
+        console.log("sanitizedEmailBody", sanitizedEmailBody);
+      
 
-        const {emailContent, senderEmails, emailSubject} = JSON.parse(sanitizedEmailBody);
-
-        const requiredFields = ["emailContent", "senderEmails", "emailSubject"];
-
-        const missingFields = requiredFields.filter(field => !(field in JSON.parse(sanitizedEmailBody)));
-
-        if (missingFields.length > 0) {
-            console.log("Invalid request, missing fields:", missingFields);
-            return res.status(400).json({ error: 'Invalid request body' });
-        }
-
-        const systemPrompt = `busca dentro de esta lista ${BANNED_BUSINESS} si el correo pertenece a una empresa de la lista,
-        si el correo pertenece a una empresa de la lista debes devolver un json con el siguiente formato: 
+        const systemPrompt = `Tu tarea es analizar un texto y buscar la empresa a la que pertenece el correo, posteriormente debes acceder a esta lista de empresas prohibidas: ${BANNED_BUSINESS} 
+        y si el correo pertenece a una empresa de la lista debes devolver un json con el siguiente formato:
+        Ten en cuenta que este correo recibe pedidos para nuestro cliente Olimpia o pedidos franui.
         {
             "business": "nombre de la empresa",
             "banned": true
@@ -56,9 +39,7 @@ async function checkifBusinessIsBanned (req,res){
         } no quiero explicaciones ni nada mas, solo el json`;
 
         const userPrompt = `este es el texto que debes analizar:
-        este es el contenido del correo: ${emailContent}
-        este es el asunto del correo: ${emailSubject}
-        este es el remitente del correo: ${senderEmails}
+        ${sanitizedEmailBody}
         `;
         const response = await client.chat.completions.create({
             model: 'gpt-4o',
