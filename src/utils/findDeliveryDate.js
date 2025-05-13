@@ -177,7 +177,8 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
     let deliveryIndex = null;
 
     const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
-    const emailDateHour = moment.utc(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').hour();
+    // const emailDateHour = moment.utc(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').hour();
+    const emailDateHour = moment(emailDate).tz('America/Santiago').format('YYYY-MM-DDTHH:mm:ssZ');;
     const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
 
     //encontrar el proximo indice de entrega

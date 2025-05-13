@@ -46,9 +46,17 @@ app.get('/', async (req, res) => {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });
   }
 
-  const communityResponse =  findDeliveryDayByComuna("vitacura","2025-05-17T14:00:01Z");
-  console.log("communityResponse", communityResponse);
-  res.json(communityResponse);
+
+  const emailDate =  "2025-05-13T15:57:46.000Z"
+
+  const date = moment(emailDate).tz('America/Santiago').format('YYYY-MM-DDTHH:mm:ssZ');
+  console.log("date", date);
+  res.json({date});
+  return
+
+  // const communityResponse =  findDeliveryDayByComuna("vitacura","2025-05-17T14:00:01Z");
+  // console.log("communityResponse", communityResponse);
+  // res.json(communityResponse);
 
   return 
 
