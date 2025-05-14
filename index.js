@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 import moment from 'moment';
 
 import findDeliveryDayByComuna from './src/utils/findDeliveryDate.js'; // Import the function
-moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
+// moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
 
 const app = express();
 dotenv.config();
@@ -54,7 +54,7 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  const communityResponse =  findDeliveryDayByComuna("LAS CONDES","2025-05-14T09:36:01Z");
+  const communityResponse =  findDeliveryDayByComuna("LAS CONDES","2025-05-12T12:15:01Z");
   console.log("communityResponse", communityResponse);
   res.json(communityResponse);
 

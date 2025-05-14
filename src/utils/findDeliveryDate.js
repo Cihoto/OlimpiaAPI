@@ -7,7 +7,7 @@
 
 import moment from 'moment-timezone'; // Import moment-timezone for timezone support
 import { isFileLike } from 'openai/uploads.mjs';
-moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
+// moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
 
 const uniqueCommunities = [
     "SANTIAGO CENTRO",
@@ -140,9 +140,9 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
     // Obtiene la hora de la fecha del correo electrónico
 
 
-    const formattedDate = moment(emailDate).format("YYYY/MM/DD HH:mm:ss");
+    // const formattedDate = moment(emailDate).format("YYYY/MM/DD HH:mm:ss");
 
-
+    
     if (!comunaToSearch || typeof comunaToSearch !== 'string') {
         return null; // Invalid input
     }
@@ -173,11 +173,12 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         });
 
     deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
+    console.log("deliveryDayIndexes", deliveryDayIndexes);
     let deliveryIndex = null;
 
     const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
-    // const emailDateHour = moment.utc(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').hour();
-    const emailDateHour = moment(emailDate).tz('America/Santiago').format('YYYY-MM-DDTHH:mm:ssZ');;
+    // Solo obtener la hora local de la fecha sin convertir a otra zona horaria
+    const emailDateHour = moment(emailDate,'YYYY-MM-DD HH::mm:ss').hour();
     const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
 
     //encontrar el proximo indice de entrega
@@ -186,6 +187,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const deliveryDayIndex = deliveryDayIndexes[i].index;
 
         if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
+            
             // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
             deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
 
@@ -194,6 +196,13 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
 
         if (deliveryDayIndex > emailDateDayIndex) {
+            console.log("test1")
+            console.log({deliveryDayIndexes})
+            console.log({i})
+            console.log({emailDateFormatted})
+            console.log({emailDateHour})
+
+            console.log("________________________________SEPARATOR_______________________________________________")
 
             deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
             break;
