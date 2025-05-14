@@ -193,8 +193,9 @@ class Bill {
                 ventaRecDesGlobal: globalDiscount,
                 gloss: this.gloss,
                 customFields: [],
-                isTransferDocument: total >= 1600000 ? true : false,
+                isTransferDocument: true
             };
+            // isTransferDocument: total >= 1600000 ? true : false,
         } catch (error) {
             if (error.code && error.message) {
                 throw error;

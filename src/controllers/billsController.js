@@ -3,8 +3,8 @@ import fs from 'fs';
 import path from 'path';
 
 async function createBill(req, res) {
-    if(!req.apiKey) {
-        res.status(401).json({code:401, error: 'Error al autenticar' });
+    if (!req.apiKey) {
+        res.status(401).json({ code: 401, error: 'Error al autenticar' });
         return;
     }
     try {
@@ -49,7 +49,10 @@ async function createBill(req, res) {
         // };
         // const {body} = reqq;
 
-        const {body} = req;
+
+        // FROM HERE
+
+        const { body } = req;
         const bill = new Bill();
         bill.apiKey = req.apiKey
         bill.documentType = body.documentType;
@@ -89,6 +92,7 @@ async function createBill(req, res) {
 
         fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
 
+        //to here 
         // console.log(BILLJSON);
         // res.status(200).json({
         //     success: true,
@@ -96,16 +100,14 @@ async function createBill(req, res) {
         // });
         // return
 
-        // res.status(200).json(BILLJSON);
-
         const saveSaleURL = `https://replapi.defontana.com/api/sale/SaveSale`
-        const createBillDefontana = await fetch(saveSaleURL,{
+        const createBillDefontana = await fetch(saveSaleURL, {
             method: 'POST',
-            headers:{
-                'Content-Type': 'application/json',    
+            headers: {
+                'Content-Type': 'application/json',
                 Authorization: `Bearer ${req.apiKey}`
             },
-            body: JSON.stringify(BILLJSON)
+            body: JSON.stringify(billData)
         })
 
         const createBillDefontanaResponse = await createBillDefontana.json();
@@ -114,8 +116,10 @@ async function createBill(req, res) {
         res.status(200).json({
             createBillDefontanaResponse,
             success: true,
-            data: BILLJSON
+            data: billData
         });
+        
+        return;
 
         // const checkIssuedBillURL = `https://replapi.defontana.com/api/Sale/GetSaleByExternalDocumentID?externalDocumentID=1101997304`
         // const checkIssuedBill = await fetch(checkIssuedBillURL,{
@@ -135,20 +139,14 @@ async function createBill(req, res) {
         // const {detailsList} = BILLJSON;
 
         // const mapped = detailsList.map(item => item.code)
-        
+
         // console.log("mapped", mapped);
-
-
-
-        return
-
-        
     } catch (error) {
         console.error('Error creating billsdasdasd:', error);
         if (error.code && error.message) {
-            res.status(error.code).json({	
+            res.status(error.code).json({
                 ...error,
-                success:false
+                success: false
             });
         } else {
             res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error' });
@@ -156,17 +154,17 @@ async function createBill(req, res) {
     }
 }
 async function getBillById(req, res) {
-    if(!req.apiKey) {
-        res.status(401).json({code:401, error: 'Error al autenticar solicitud' });
+    if (!req.apiKey) {
+        res.status(401).json({ code: 401, error: 'Error al autenticar solicitud' });
         return;
     }
     try {
-        const {billId} = req.params;
+        const { billId } = req.params;
         const checkIssuedBillURL = `${process.env.SALE_API_URL}GetSaleByExternalDocumentID?externalDocumentID=${billId}`
-        const checkIssuedBill = await fetch(checkIssuedBillURL,{
+        const checkIssuedBill = await fetch(checkIssuedBillURL, {
             method: 'GET',
-            headers:{
-                ContentType: 'application/json',    
+            headers: {
+                ContentType: 'application/json',
                 Authorization: `Bearer ${req.apiKey}`
             }
         })
@@ -176,11 +174,11 @@ async function getBillById(req, res) {
         res.json(checkIssuedBillResponse);
 
     } catch (error) {
-        console.log (error);
+        console.log(error);
         return res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error' });
     }
 }
 
 
 
-export { createBill,getBillById };
+export { createBill, getBillById };
