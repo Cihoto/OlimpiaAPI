@@ -88,9 +88,7 @@ const deliveryDays = [
             "ESTACIÓN CENTRAL",
             "RECOLETA",
             "COLINA",
-            "HUECHURABA",
-            "INDEPENDENCIA",
-            "QUILICURA"
+            "HUECHURABA"
         ]
     },
     {
@@ -111,7 +109,7 @@ const deliveryDays = [
             "LA CISTERNA",
             "CERRILLOS",
             "MACUL",
-            "ÑUÑOA"
+            "ÑUÑOA",
         ]
     },
     {
@@ -129,7 +127,8 @@ const deliveryDays = [
             "COLINA",
             "HUECHURABA",
             "INDEPENDENCIA",
-            "QUILICURA"
+            "QUILICURA",
+            "CONCHALÍ",
         ]
     }
 ];
