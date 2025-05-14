@@ -36,8 +36,6 @@ async function readCSV(req, res) {
                     // item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
                 })
 
-
-
                 if (results.length == 0) {
                     res.status(200).json({
                         data: [],
@@ -296,11 +294,18 @@ async function readEmailBody(req, res) {
 
         const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery,emailDate); // Call the readCSV function with the RUT and address
         console.log("clientData", clientData);
+        let formattedEmailDate = "";
+        if (moment(emailDate, moment.ISO_8601, true).isValid()) {
+            formattedEmailDate = moment(emailDate).tz('America/Santiago').format('DD-MM-YYYY HH:mm:ss');
+        }
+
         const merged = {
             "EmailData": { ...validJson },
             "ClientData": { ...clientData },
-            "executionDate" : moment().format('DD-MM-YYYY HH:mm:ss'),
-            "OC_date": moment().format('DD-MM-YYYY')
+            "executionDate": moment().format('DD-MM-YYYY HH:mm:ss'),
+            "OC_date": moment().format('DD-MM-YYYY'),
+            "emailDate": moment(emailDate, moment.ISO_8601, true).isValid() ? formattedEmailDate : emailDate,
+
         };
 
         res.status(200).json({ merged });
