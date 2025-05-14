@@ -47,16 +47,16 @@ app.get('/', async (req, res) => {
   }
 
 
-  const emailDate =  "2025-05-13T15:57:46.000Z"
+  // const emailDate =  "2025-05-13T15:57:46.000Z"
 
-  const date = moment(emailDate).tz('America/Santiago').format('YYYY-MM-DDTHH:mm:ssZ');
-  console.log("date", date);
-  res.json({date});
-  return
+  // const date = moment(emailDate).tz('America/Santiago').format('YYYY-MM-DDTHH:mm:ssZ');
+  // console.log("date", date);
+  // res.json({date});
+  // return
 
-  // const communityResponse =  findDeliveryDayByComuna("vitacura","2025-05-17T14:00:01Z");
-  // console.log("communityResponse", communityResponse);
-  // res.json(communityResponse);
+  const communityResponse =  findDeliveryDayByComuna("LAS CONDES","2025-05-14T09:36:01Z");
+  console.log("communityResponse", communityResponse);
+  res.json(communityResponse);
 
   return 
 
