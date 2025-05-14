@@ -107,7 +107,7 @@ async function createBill(req, res) {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${req.apiKey}`
             },
-            body: JSON.stringify(billData)
+            body: JSON.stringify(BILLJSON)
         })
 
         const createBillDefontanaResponse = await createBillDefontana.json();
@@ -116,9 +116,9 @@ async function createBill(req, res) {
         res.status(200).json({
             createBillDefontanaResponse,
             success: true,
-            data: billData
+            data: BILLJSON
         });
-        
+
         return;
 
         // const checkIssuedBillURL = `https://replapi.defontana.com/api/Sale/GetSaleByExternalDocumentID?externalDocumentID=1101997304`
