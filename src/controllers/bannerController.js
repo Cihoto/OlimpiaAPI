@@ -9,7 +9,10 @@ const BANNED_BUSINESS = [
     "COMERCIAL QUINTO CENTRO",
     "COMERCIAL QUINTO CENTRO SPA.",
     "QUINTO CENTRO",
-    "QUINTO CENTRO SPA"
+    "QUINTO CENTRO SPA",,
+    "keylogistics",
+    "keylogistics.cl",
+    "keyLogistics (ESMAX)",
 ]
 
 async function checkifBusinessIsBanned (req,res){

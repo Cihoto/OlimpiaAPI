@@ -135,142 +135,150 @@ const deliveryDays = [
 
 function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
-    // const todayWeekDayIndex = moment().day(); // Obtiene el índice del día de la semana (0 para domingo, 1 para lunes, etc.)
-    // Obtiene el índice del día de la semana de la fecha del correo electrónico
-    // Obtiene la hora de la fecha del correo electrónico
+    try {
 
 
-    // const formattedDate = moment(emailDate).format("YYYY/MM/DD HH:mm:ss");
 
-    
-    if (!comunaToSearch || typeof comunaToSearch !== 'string') {
-        return null; // Invalid input
-    }
-    console.log("comunaToSearch 2", comunaToSearch);
+        // const todayWeekDayIndex = moment().day(); // Obtiene el índice del día de la semana (0 para domingo, 1 para lunes, etc.)
+        // Obtiene el índice del día de la semana de la fecha del correo electrónico
+        // Obtiene la hora de la fecha del correo electrónico
 
 
-    // Check if the comunaToSearch is in the list of unique communities
-    const isValidCommunity = uniqueCommunities.find(community => {
-        const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-        return normalize(community) === normalize(comunaToSearch);
-    });
+        // const formattedDate = moment(emailDate).format("YYYY/MM/DD HH:mm:ss");
 
-    if (!isValidCommunity) {
-        return null; // Invalid community
-    }
 
-    // Find all indexes of the delivery days that match the comunaToSearch
-    const deliveryDayIndexes = deliveryDays
-        .filter(day => day.communities.some(community => {
+        if (!comunaToSearch || typeof comunaToSearch !== 'string') {
+            return null; // Invalid input
+        }
+        console.log("comunaToSearch 2", comunaToSearch);
+
+
+        // Check if the comunaToSearch is in the list of unique communities
+        const isValidCommunity = uniqueCommunities.find(community => {
             const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
             return normalize(community) === normalize(comunaToSearch);
-        }))
-        .map(day => {
-            return {
-                index: day.index,
-                dayName: day.dayName
-            }
         });
 
-    deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
-    console.log("deliveryDayIndexes", deliveryDayIndexes);
-    let deliveryIndex = null;
-
-    const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
-    // Solo obtener la hora local de la fecha sin convertir a otra zona horaria
-    const emailDateHour = moment(emailDate,'YYYY-MM-DD HH::mm:ss').hour();
-    const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
-
-    //encontrar el proximo indice de entrega
-    for (let i = 0; i < deliveryDayIndexes.length; i++) {
-        // console.log("deliveryDayIndexes", deliveryDayIndexes[i]);
-        const deliveryDayIndex = deliveryDayIndexes[i].index;
-
-        if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
-            
-            // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
-            deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-
-            break;
+        if (!isValidCommunity) {
+            return null; // Invalid community
         }
 
+        // Find all indexes of the delivery days that match the comunaToSearch
+        const deliveryDayIndexes = deliveryDays
+            .filter(day => day.communities.some(community => {
+                const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+                return normalize(community) === normalize(comunaToSearch);
+            }))
+            .map(day => {
+                return {
+                    index: day.index,
+                    dayName: day.dayName
+                }
+            });
 
-        if (deliveryDayIndex > emailDateDayIndex) {
-            console.log("test1")
-            console.log({deliveryDayIndexes})
-            console.log({i})
-            console.log({emailDateFormatted})
-            console.log({emailDateHour})
+        deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
+        console.log("deliveryDayIndexes", deliveryDayIndexes);
+        let deliveryIndex = null;
 
-            console.log("________________________________SEPARATOR_______________________________________________")
+        const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
+        // Solo obtener la hora local de la fecha sin convertir a otra zona horaria
+        const emailDateHour = moment(emailDate, 'YYYY-MM-DD HH::mm:ss').hour();
+        const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
 
-            deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
-            break;
-            console.log(deliveryDayIndex, ">>>>>>>>>>>>>>>>", emailDateDayIndex)
-            console.log("***********************************************************************************")
-            const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
+        //encontrar el proximo indice de entrega
+        for (let i = 0; i < deliveryDayIndexes.length; i++) {
+            // console.log("deliveryDayIndexes", deliveryDayIndexes[i]);
+            const deliveryDayIndex = deliveryDayIndexes[i].index;
 
-            // deliveryIndex = daysToNextDelivery;
-            // break
+            if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
 
-            if (daysToNextDelivery > 1) {
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
+                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+
                 break;
             }
 
-            if (emailDateHour >= 12) {
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-            } else {
+
+            if (deliveryDayIndex > emailDateDayIndex) {
+                console.log("test1")
+                console.log({ deliveryDayIndexes })
+                console.log({ i })
+                console.log({ emailDateFormatted })
                 console.log({ emailDateHour })
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+
+                console.log("________________________________SEPARATOR_______________________________________________")
+
+                deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
+                break;
+                console.log(deliveryDayIndex, ">>>>>>>>>>>>>>>>", emailDateDayIndex)
+                console.log("***********************************************************************************")
+                const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
+
+                // deliveryIndex = daysToNextDelivery;
+                // break
+
+                if (daysToNextDelivery > 1) {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                    break;
+                }
+
+                if (emailDateHour >= 12) {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                } else {
+                    console.log({ emailDateHour })
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                }
+
+                break;
             }
 
-            break;
-        }
+            if (emailDateDayIndex == 5) {
+                console.log("________________________________________________________________________________")
 
-        if (emailDateDayIndex == 5) {
-            console.log("________________________________________________________________________________")
+                deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
+                // break;
+                const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
 
-            deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
-            // break;
-            const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
-
-            // deliveryIndex = daysToNextDelivery;
-            // break;
-            // if (daysToNextDelivery > 1) {
-            //     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-            //     break;
-            // }
-            if (emailDateHour >= 12) {
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-            } else {
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                // deliveryIndex = daysToNextDelivery;
+                // break;
+                // if (daysToNextDelivery > 1) {
+                //     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                //     break;
+                // }
+                if (emailDateHour >= 12) {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                } else {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                }
+                break;
             }
-            break;
+
+
         }
-       
 
+        // Get the day name using the deliveryIndex
+        const deliveryObj = deliveryDayIndexes[deliveryIndex]
+
+        // teniendo en cuenta deliveryObject.dayName que puede ser LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, buscar la fecha futura mas cercana que sea igual a la fecha de entrega teniendo como punto de partida la fecha del correo
+        let deliveryDate = null;
+        let date = emailDate;
+        // while (deliveryObj.index != deliveryDate || counter <= 10) {
+        // while (deliveryObj.index != deliveryDate || counter < 10) {
+        while (deliveryObj.index != deliveryDate) {
+            date = moment(date).add(1, 'day').format("YYYY-MM-DD");
+            const dayOfWeek = moment(date).day();
+            deliveryDate = dayOfWeek;
+        }
+        // const deliveryDate = moment(emailDate).day(deliveryObj.index).format("YYYY/MM/DD");
+        return date
+        // return {deliveryIndex, moment(deliveryIndex).format("YYYY/MM/DD HH:mm:ss")};
+    } catch (e) {
+        console.log("error", e)
+        return null;
     }
-
-    // Get the day name using the deliveryIndex
-    const deliveryObj = deliveryDayIndexes[deliveryIndex]
-
-    // teniendo en cuenta deliveryObject.dayName que puede ser LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, buscar la fecha futura mas cercana que sea igual a la fecha de entrega teniendo como punto de partida la fecha del correo
-    let deliveryDate = null;
-    let date = emailDate;
-    // while (deliveryObj.index != deliveryDate || counter <= 10) {
-    // while (deliveryObj.index != deliveryDate || counter < 10) {
-    while (deliveryObj.index != deliveryDate) {
-        date = moment(date).add(1, 'day').format("YYYY-MM-DD");
-        const dayOfWeek = moment(date).day();
-        deliveryDate = dayOfWeek;
-    }
-    // const deliveryDate = moment(emailDate).day(deliveryObj.index).format("YYYY/MM/DD");
-    return date
-    // return {deliveryIndex, moment(deliveryIndex).format("YYYY/MM/DD HH:mm:ss")};
 }
 
-function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour) {
+function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour) {
     const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
 
     // deliveryIndex = daysToNextDelivery;
@@ -285,7 +293,7 @@ function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDate
         return moveForward(deliveryDayIndexes.length, i, 1)
     } else {
         // console.log({ emailDateHour })
-        return  moveForward(deliveryDayIndexes.length, i, 0)
+        return moveForward(deliveryDayIndexes.length, i, 0)
     }
 }
 

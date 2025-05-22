@@ -1,0 +1,37 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © josetomasmora
+
+//@version=6
+indicator("INFO_WEBHOOK")
+
+// RSI en el timeframe actual
+rsi_current = ta.rsi(close, 14)
+
+// RSI en 4 horas
+rsi_4h = request.security(syminfo.tickerid, "4H", ta.rsi(close, 14))
+
+// RSI en 1 hora
+rsi_1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
+
+// RSI en 1 día
+rsi_1d = request.security(syminfo.tickerid, "D", ta.rsi(close, 14))
+
+plot(rsi_current, color=color.blue, title="RSI Actual")
+plot(rsi_4h, color=color.red, title="RSI 4H")
+plot(rsi_1h, color=color.green, title="RSI 1H")
+plot(rsi_1d, color=color.orange, title="RSI 1D")
+
+// Construir un string JSON con los valores RSI
+json = '{' +
+    '"rsi_actual": ' + str.tostring(rsi_current) + ',' +
+    '"rsi_4h": ' + str.tostring(rsi_4h) + ',' +
+    '"rsi_1h": ' + str.tostring(rsi_1h) + ',' +
+    '"rsi_1d": ' + str.tostring(rsi_1d) +
+    '}'
+
+// Puedes usar este string en una alerta:
+// alert(json, alert.freq_once_per_bar_close)
+
+mensaje_json = str.format('{ "precio": %f }', rsi_4h)
+
+alertcondition(true, title="Análisis multiframe disponible", message = '{"rsi_1h": ' + str.tostring(rsi_1h) + '}')

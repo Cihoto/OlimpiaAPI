@@ -54,7 +54,7 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  const communityResponse =  findDeliveryDayByComuna("LAS CONDES","2025-05-12T12:15:01Z");
+  const communityResponse =  findDeliveryDayByComuna("MAIPU","2025-05-12T09:15:01Z");
   console.log("communityResponse", communityResponse);
   res.json(communityResponse);
 

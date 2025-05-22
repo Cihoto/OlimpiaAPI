@@ -454,7 +454,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailD
 
                     if (results.length == 1) {
                         const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho'],emailDate);
-                        if (deliveryDay) {
+                        if (deliveryDay != null) {
                             results[0]['deliveryDay'] = `${deliveryDay}`;
                         }else{
                             results[0]['deliveryDay'] = "";
@@ -534,7 +534,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailD
 
                     const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho'],emailDate);
 
-                    if (deliveryDay) {
+                    if (deliveryDay != null) {
                         found['deliveryDay'] = `${deliveryDay}`;
                     }else{
                         found['deliveryDay'] = "";
