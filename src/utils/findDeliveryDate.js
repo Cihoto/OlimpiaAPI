@@ -9,6 +9,7 @@ import moment from 'moment-timezone'; // Import moment-timezone for timezone sup
 import { isFileLike } from 'openai/uploads.mjs';
 // moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
 
+
 const uniqueCommunities = [
     "SANTIAGO CENTRO",
     "LAS CONDES",
@@ -136,16 +137,10 @@ const deliveryDays = [
 function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
     try {
-
-
-
         // const todayWeekDayIndex = moment().day(); // Obtiene el índice del día de la semana (0 para domingo, 1 para lunes, etc.)
         // Obtiene el índice del día de la semana de la fecha del correo electrónico
         // Obtiene la hora de la fecha del correo electrónico
-
-
         // const formattedDate = moment(emailDate).format("YYYY/MM/DD HH:mm:ss");
-
 
         if (!comunaToSearch || typeof comunaToSearch !== 'string') {
             return null; // Invalid input
@@ -182,7 +177,8 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
         const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
         // Solo obtener la hora local de la fecha sin convertir a otra zona horaria
-        const emailDateHour = moment(emailDate, 'YYYY-MM-DD HH::mm:ss').hour();
+        // Obtener la hora en horario chileno (America/Santiago)
+        const emailDateHour = moment.tz(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ', 'America/Santiago').hour();
         const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
 
         //encontrar el proximo indice de entrega
@@ -194,41 +190,6 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
                 // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
                 deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-
-                break;
-            }
-
-
-            if (deliveryDayIndex > emailDateDayIndex) {
-                console.log("test1")
-                console.log({ deliveryDayIndexes })
-                console.log({ i })
-                console.log({ emailDateFormatted })
-                console.log({ emailDateHour })
-
-                console.log("________________________________SEPARATOR_______________________________________________")
-
-                deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
-                break;
-                console.log(deliveryDayIndex, ">>>>>>>>>>>>>>>>", emailDateDayIndex)
-                console.log("***********************************************************************************")
-                const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
-
-                // deliveryIndex = daysToNextDelivery;
-                // break
-
-                if (daysToNextDelivery > 1) {
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                    break;
-                }
-
-                if (emailDateHour >= 12) {
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-                } else {
-                    console.log({ emailDateHour })
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                }
-
                 break;
             }
 
@@ -248,6 +209,30 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 if (emailDateHour >= 12) {
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
                 } else {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                }
+                break;
+            }
+
+            if (deliveryDayIndex > emailDateDayIndex) {
+
+                console.log("________________________________SEPARATOR_______________________________________________")
+
+                deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
+
+                const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
+                console.log("daysToNextDelivery", daysToNextDelivery)
+
+                if (daysToNextDelivery > 1) {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                    break;
+                }
+
+                if (emailDateHour >= 12) {
+                    console.log("laskdejalsdkjalskdjalsd", emailDateHour)
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                } else {
+                    console.log({ emailDateHour })
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
                 }
                 break;

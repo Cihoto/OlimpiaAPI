@@ -47,6 +47,8 @@ app.get('/', async (req, res) => {
   }
 
 
+  // res.json({message:"Hello World, this is your api token " + req.apiKey});
+
   // const emailDate =  "2025-05-13T15:57:46.000Z"
 
   // const date = moment(emailDate).tz('America/Santiago').format('YYYY-MM-DDTHH:mm:ssZ');
@@ -54,7 +56,7 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  const communityResponse =  findDeliveryDayByComuna("MAIPU","2025-05-12T09:15:01Z");
+  const communityResponse =  findDeliveryDayByComuna("RECOLETA","2025-05-23T10:15:01Z");
   console.log("communityResponse", communityResponse);
   res.json(communityResponse);
 
@@ -135,4 +137,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
