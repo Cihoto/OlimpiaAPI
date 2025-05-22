@@ -259,7 +259,7 @@ class Bill {
     #getSellerInfo = async () => {
         try {
 
-            const sellersURL = `https://replapi.defontana.com/api/sale/GetSellers?itemsPerPage=100&pageNumber=1`;
+            const sellersURL = `https://api.defontana.com/api/sale/GetSellers?itemsPerPage=100&pageNumber=1`;
             const sellers = await fetch(sellersURL, {
                 method: 'GET',
                 headers: {
@@ -951,7 +951,7 @@ class Bill {
 
     #getSaleBusinessCenterAccounts = async (businessCenterCode) => {
         try {
-            const businessCentersURL = `https://replapi.defontana.com/api/Accounting/GetBusinessCenterPlan`;
+            const businessCentersURL = `https://api.defontana.com/api/Accounting/GetBusinessCenterPlan`;
             const businessCenters = await fetch(businessCentersURL, {
                 method: 'GET',
                 headers: {
@@ -1020,7 +1020,7 @@ class Bill {
 
     #needClassifier = async (businessCenterCode) => {
         try{
-            const classifierAnalysisURL = `https://replapi.defontana.com/api/Accounting/GetAccountAnalisys?Account=${businessCenterCode}`;
+            const classifierAnalysisURL = `https://api.defontana.com/api/Accounting/GetAccountAnalisys?Account=${businessCenterCode}`;
             const classifierAnalysis = await fetch(classifierAnalysisURL, {
                 method: 'GET',
                 headers: {
