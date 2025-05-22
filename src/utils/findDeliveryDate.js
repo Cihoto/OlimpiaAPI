@@ -214,7 +214,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 break;
             }
 
-            if (deliveryDayIndex > emailDateDayIndex) {
+            // if (deliveryDayIndex > emailDateDayIndex) {
 
                 console.log("________________________________SEPARATOR_______________________________________________")
 
@@ -236,14 +236,13 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
                 }
                 break;
-            }
-
-
+            // }
         }
 
         // Get the day name using the deliveryIndex
         const deliveryObj = deliveryDayIndexes[deliveryIndex]
-
+        console.log("deliveryIndex", deliveryIndex)
+        console.log("deliveryObj", deliveryObj)
         // teniendo en cuenta deliveryObject.dayName que puede ser LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, buscar la fecha futura mas cercana que sea igual a la fecha de entrega teniendo como punto de partida la fecha del correo
         let deliveryDate = null;
         let date = emailDate;
@@ -255,6 +254,10 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             deliveryDate = dayOfWeek;
         }
         // const deliveryDate = moment(emailDate).day(deliveryObj.index).format("YYYY/MM/DD");
+        console.log("date", date)
+        console.log("date", date)
+        console.log("date", date)
+        console.log("date", date)
         return date
         // return {deliveryIndex, moment(deliveryIndex).format("YYYY/MM/DD HH:mm:ss")};
     } catch (e) {
