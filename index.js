@@ -46,6 +46,7 @@ app.get('/', async (req, res) => {
   if (!req.apiKey) {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });
   }
+  const { apiKey } = req;
   // const BILLJSON = {
   //   "aaaa": "string"
   // }
@@ -91,11 +92,11 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  const communityResponse = findDeliveryDayByComuna("LO BARNECHEA", "2025-05-23T20:15:56.000Z");
-  console.log("communityResponse", communityResponse);
-  res.json(communityResponse);
+  // const communityResponse = findDeliveryDayByComuna("LO BARNECHEA", "2025-05-23T20:15:56.000Z");
+  // console.log("communityResponse", communityResponse);
+  // res.json(communityResponse);
 
-  return
+  // return
 
   // if(!req.apiKey) {
   //   return res.status(500).json({ error: 'Error al autenticar la solicitud' });
@@ -108,13 +109,38 @@ app.get('/', async (req, res) => {
   // const getPriceListDetail = await getPriceListDetails(req.apiKey)
   // const documentAnalysis = await getDocumentAnalysis(req.apiKey)
   // const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
-  const getClientFromId = await getClientByFileId(req.apiKey, "77.732.169-2")
+  // const getClientFromId = await getClientByFileId(req.apiKey, "77.732.169-2")
   // const sellersIdd = await sellersId(req.apiKey) 
   // const getProdss = await getProds(req.apiKey)
   // const getStoragess = await getStorages(req.apiKey)
   // const businessAnalysiss = await businessAnalysis(req.apiKey);// api/Sale/GetDocumentAnalisys
   // const codess = allPayments.items.map((desc) => desc.code);
-  res.json({ getClientFromId });
+  // res.json({ businessAnalysiss });
+
+
+  // const businessCentersURL = `${process.env.ACCOUNTING_API_URL_DEV}GetBusinessCenterPlan`
+  // const businessCenters = await fetch(businessCentersURL, {
+  //   method: 'GET',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     'Authorization': `Bearer ${apiKey}`
+  //   }
+  // });
+  // const businessCentersData = await businessCenters.json();
+  // console.log("businessCentersData", businessCentersData);
+  // res.json({ businessCentersData });
+
+
+  // const classifierAnalysisURL = `${process.env.ACCOUNTING_API_URL_DEV}GetAccountAnalisys?Account=EMPNEGVTAVTA000`;
+  // const classifierAnalysis = await fetch(classifierAnalysisURL, {
+  //   method: 'GET',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     'Authorization': `Bearer ${apiKey}`
+  //   }
+  // });
+  // const classifierAnalysisData = await classifierAnalysis.json();
+  // res.json({ classifierAnalysisData });
   return
   const businessCenter = await businessCenters(req.apiKey) //preguntar por API //api/Accounting/GetBusinessCenterPlan
   const saleBusinessCenterAccounts = {

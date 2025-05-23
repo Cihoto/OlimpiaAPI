@@ -44,54 +44,54 @@ class Bill {
     }
 
     validate() {
-        if (!this.apiKey || this.apiKey === "") {  
+        if (!this.apiKey || this.apiKey === "") {
             throw { code: 400, error: "Bad request", message: 'API key is required' };
         }
-        if (!this.documentType || this.documentType === "") { 
+        if (!this.documentType || this.documentType === "") {
             throw { code: 400, error: "Bad request", message: 'Document type is required' };
         }
-        if ((this.firstFolio == null || this.firstFolio == undefined) || this.firstFolio === "") { 
+        if ((this.firstFolio == null || this.firstFolio == undefined) || this.firstFolio === "") {
             throw { code: 400, error: "Bad request", message: 'First folio is required' };
         }
-        if ((this.lastFolio == null || this.lastFolio === undefined) || this.lastFolio === "") { 
+        if ((this.lastFolio == null || this.lastFolio === undefined) || this.lastFolio === "") {
             throw { code: 400, error: "Bad request", message: 'Last folio is required' };
         }
-        if (!this.clientFile || this.clientFile === "") { 
+        if (!this.clientFile || this.clientFile === "") {
             throw { code: 400, error: "Bad request", message: 'Client file is required' };
         }
-        if (!this.paymentCondition || this.paymentCondition === "") { 
+        if (!this.paymentCondition || this.paymentCondition === "") {
             throw { code: 400, error: "Bad request", message: 'Payment condition is required' };
         }
-        if (!this.sellerFileId || this.sellerFileId === "") { 
+        if (!this.sellerFileId || this.sellerFileId === "") {
             throw { code: 400, error: "Bad request", message: 'Seller file ID is required' };
         }
-        if( !this.businessCenter || this.businessCenter === "") {
+        if (!this.businessCenter || this.businessCenter === "") {
             throw { code: 400, error: "Bad request", message: 'Business center is required' };
         }
-        if (!this.shopId || this.shopId === "") { 
+        if (!this.shopId || this.shopId === "") {
             throw { code: 400, error: "Bad request", message: 'Shop ID is required' };
         }
-        if (!this.priceList || this.priceList === "") { 
+        if (!this.priceList || this.priceList === "") {
             throw { code: 400, error: "Bad request", message: 'Price list is required' };
         }
-        if (!this.giro || this.giro === "") { 
+        if (!this.giro || this.giro === "") {
             throw { code: 400, error: "Bad request", message: 'Giro is required' };
         }
-        if( !this.attachedDocuments || !Array.isArray(this.attachedDocuments)) {
+        if (!this.attachedDocuments || !Array.isArray(this.attachedDocuments)) {
             throw { code: 400, error: "Bad request", message: 'Attached documents is required and must be an array' };
         }
         // Removed validation for district and city as they are not part of the class properties
-        if( !this.storage || this.storage === "") { 
+        if (!this.storage || this.storage === "") {
             throw { code: 400, error: "Bad request", message: 'storage is required' };
         }
-        if (!this.details || !Array.isArray(this.details)) { 
+        if (!this.details || !Array.isArray(this.details)) {
             throw { code: 400, error: "Bad request", message: 'Details is required and must be an array' };
         }
-        if( !this.ventaRecDesGlobal || !Array.isArray(this.ventaRecDesGlobal)) { 
+        if (!this.ventaRecDesGlobal || !Array.isArray(this.ventaRecDesGlobal)) {
             throw { code: 400, error: "Bad request", message: 'Global discount is required and must be an array' };
         }
         // gloss is a free input, so no validation is needed
-        if(!this.customFields || !Array.isArray(this.customFields)) { 
+        if (!this.customFields || !Array.isArray(this.customFields)) {
             throw { code: 400, error: "Bad request", message: 'Custom fields is required and must be an array' };
         }
         if (typeof this.isTransferDocument !== 'boolean') {
@@ -99,8 +99,8 @@ class Bill {
         }
     }
 
-    async getFileid(){
-        const response = await this.#getClientByFileId(this.apiKey,this.clientFile);
+    async getFileid() {
+        const response = await this.#getClientByFileId(this.apiKey, this.clientFile);
         console.log(response);
         return response;
     }
@@ -111,7 +111,7 @@ class Bill {
             if (!clientData.success) {
                 throw { code: 400, error: "Not Found", message: clientData.message };
             }
-    
+
             const paymentCondition = this.#checkpaymentCondition();
             if (!paymentCondition.success) {
                 throw { code: 400, error: "Bad Request", message: paymentCondition.message };
@@ -120,15 +120,15 @@ class Bill {
             // const clientAnalysis = this.#getClientAnalysis();
 
             const sellerFileId = await this.#getSellerInfo();
-            if(!sellerFileId.success) {
+            if (!sellerFileId.success) {
                 throw { code: 400, error: "Not Found", message: sellerFileId.message };
             }
-    
+
             const shopData = await this.#getShops();
             if (!shopData.success) {
                 throw { code: 400, error: "Not Found", message: shopData.message };
             }
-    
+
             const priceListData = await this.#getPriceList();
             if (!priceListData.success) {
                 throw { code: 400, error: "Not Found", message: priceListData.message };
@@ -141,7 +141,7 @@ class Bill {
             }
 
             const storageData = await this.#getStorage();
-            if(!storageData.success) {
+            if (!storageData.success) {
                 throw { code: 400, error: "Not Found", message: storageData.message };
             }
             const businessAnalysis = await this.#getBusinessAnalysis();
@@ -154,7 +154,7 @@ class Bill {
             if (!detailsList.success) {
                 throw { code: 400, error: "Not Found", message: detailsList.message };
             }
-    
+
             const saleTaxes = await this.#getSaleTaxes(businessAnalysis.businessAnalysis.taxeAnalysis);
             const globalDiscount = this.#getGlobalDiscount();
             const uniqueCode = moment().format("YYYYMMDDHHmmss");
@@ -179,7 +179,7 @@ class Bill {
                 sellerFileId: sellerFileId.code,
                 clientAnalysis: businessAnalysis.businessAnalysis.clientAnalysis,
                 billingCoin: "PESO",
-                billingRate: 1, 
+                billingRate: 1,
                 shopId: shopData.code,
                 priceList: `${priceListData.priceListID}`,
                 giro: this.giro,
@@ -209,23 +209,23 @@ class Bill {
         try {
             const paymentCodes = [
 
-                { code:"3DIAS", name: ["3DIAS","3"], paymentDays: 3 },
-                { code:"ANTICIPADO", name: ["ANTICIPADO","0"], paymentDays: 1 },
-                { code:"CONTADO", name: ["CONTADO","1"], paymentDays: 1 },
-                { code:"CREDITO120", name: ["CREDITO120","120"], paymentDays: 120 },
-                { code:"CREDITO10", name: ["CREDITO10","10"], paymentDays: 10 },
-                { code:"CREDITO7", name: ["CREDITO7","7"], paymentDays: 7 },
-                { code:"CREDITO15", name: ["CREDITO15","15"], paymentDays: 15 },
-                { code:"CREDITO30", name: ["CREDITO30","30"], paymentDays: 30 },
-                { code:"CREDITO45", name: ["CREDITO45","45"], paymentDays: 45 },
-                { code:"CREDITO3060", name: ["CREDITO3060","360"], paymentDays: 30 },
-                { code:"CREDITO306090", name: ["CREDITO306090","3690"], paymentDays: 30 },
-                { code:"CHEQUE", name: ["CHEQUE","C1"], paymentDays: 1 },
-                { code:"CHEQUE15DIAS", name: ["CHEQUE15DIAS","C15"], paymentDays: 15 },
-                { code:"CHEQUE30IAS", name: ["CHEQUE30IAS","C30"], paymentDays: 30 },
-                { code:"CREDITO5", name: ["CREDITO5","5"], paymentDays: 5 },
-                { code:"CREDITO60", name: ["CREDITO60","60"], paymentDays: 60 },
-                { code:"CREDITO90", name: ["CREDITO90","90"], paymentDays: 90 }
+                { code: "3DIAS", name: ["3DIAS", "3"], paymentDays: 3 },
+                { code: "ANTICIPADO", name: ["ANTICIPADO", "0"], paymentDays: 1 },
+                { code: "CONTADO", name: ["CONTADO", "1"], paymentDays: 1 },
+                { code: "CREDITO120", name: ["CREDITO120", "120"], paymentDays: 120 },
+                { code: "CREDITO10", name: ["CREDITO10", "10"], paymentDays: 10 },
+                { code: "CREDITO7", name: ["CREDITO7", "7"], paymentDays: 7 },
+                { code: "CREDITO15", name: ["CREDITO15", "15"], paymentDays: 15 },
+                { code: "CREDITO30", name: ["CREDITO30", "30"], paymentDays: 30 },
+                { code: "CREDITO45", name: ["CREDITO45", "45"], paymentDays: 45 },
+                { code: "CREDITO3060", name: ["CREDITO3060", "360"], paymentDays: 30 },
+                { code: "CREDITO306090", name: ["CREDITO306090", "3690"], paymentDays: 30 },
+                { code: "CHEQUE", name: ["CHEQUE", "C1"], paymentDays: 1 },
+                { code: "CHEQUE15DIAS", name: ["CHEQUE15DIAS", "C15"], paymentDays: 15 },
+                { code: "CHEQUE30IAS", name: ["CHEQUE30IAS", "C30"], paymentDays: 30 },
+                { code: "CREDITO5", name: ["CREDITO5", "5"], paymentDays: 5 },
+                { code: "CREDITO60", name: ["CREDITO60", "60"], paymentDays: 60 },
+                { code: "CREDITO90", name: ["CREDITO90", "90"], paymentDays: 90 }
             ];
             const paymentData = paymentCodes.find(payment => payment.name.includes(this.paymentCondition));
             if (!paymentData) {
@@ -249,10 +249,10 @@ class Bill {
 
     #getClientAnalysis() {
         return {
-            "accountNumber": "1110401001",  
-            "businessCenter": "", 
-            "classifier01": "", 
-            "classifier02": "" 
+            "accountNumber": "1110401001",
+            "businessCenter": "",
+            "classifier01": "",
+            "classifier02": ""
         }
     }
 
@@ -266,7 +266,7 @@ class Bill {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.apiKey}`
                 }
-            }); 
+            });
 
             // check if response is ok
             if (!sellers.ok) {
@@ -277,8 +277,8 @@ class Bill {
             }
 
             const sellersData = await sellers.json();
-            
-            if(!sellersData.success || sellersData.totalItems === 0) {
+
+            if (!sellersData.success || sellersData.totalItems === 0) {
                 return {
                     success: false,
                     message: sellersData.message || "No sellers available"
@@ -287,20 +287,20 @@ class Bill {
 
             const sellerInfo = sellersData.sellerList.find(seller => seller.code === this.sellerFileId);
 
-            if(!sellerInfo) {
+            if (!sellerInfo) {
                 return {
                     success: false,
                     message: "Seller not found"
                 }
             }
-            console.log({sellerInfo});
+            console.log({ sellerInfo });
             const sellerResponse = {
                 code: sellerInfo.code,
                 mail: sellerInfo.mail,
                 name: sellerInfo.name,
                 success: true
             }
-            console.log({sellerResponse});
+            console.log({ sellerResponse });
 
             return sellerResponse;
         } catch (error) {
@@ -348,7 +348,7 @@ class Bill {
                 }
             });
             const clientData = await client.json();
-    
+
             if (!clientData.success || clientData.totalItems === 0) {
                 return {
                     success: false,
@@ -356,8 +356,8 @@ class Bill {
                 };
             }
 
-            if(clientData.clientList[0].active !== "S"){
-                return { 
+            if (clientData.clientList[0].active !== "S") {
+                return {
                     success: false,
                     message: "Client is inactive"
                 }
@@ -388,11 +388,11 @@ class Bill {
         }
     }
 
-    #getEmissionDate(){
+    #getEmissionDate() {
 
         const deliveryDay = this.deliveryDay ? moment(this.deliveryDay, "YYYY-MM-DD") : null;
 
-        if(deliveryDay && deliveryDay.isValid()){
+        if (deliveryDay && deliveryDay.isValid()) {
             return {
                 day: deliveryDay.format('D'),
                 month: deliveryDay.format('M'),
@@ -409,11 +409,11 @@ class Bill {
         }
     }
 
-    #getFirstFeePaid(paymentsDays){
-        
+    #getFirstFeePaid(paymentsDays) {
+
         const deloveryDay = this.deliveryDay ? moment(this.deliveryDay, "YYYY-MM-DD") : null;
 
-        if(deloveryDay && deloveryDay.isValid()){
+        if (deloveryDay && deloveryDay.isValid()) {
             const paymentDate = deloveryDay.add(paymentsDays, 'days');
             return {
                 day: paymentDate.format('D'),
@@ -440,25 +440,25 @@ class Bill {
                     'Authorization': `Bearer ${this.apiKey}`
                 }
             });
-    
+
             const shopsData = await shops.json();
-    
+
             if (!shopsData.success || shopsData.totalItems === 0) {
                 return {
                     success: false,
                     message: shopsData.message || "No shops available"
                 };
             }
-    
+
             const shopInfo = shopsData.shopList.find(shop => shop.code === this.shopId);
-    
+
             if (!shopInfo) {
                 return {
                     success: false,
                     message: "Shop not found"
                 };
             }
-    
+
             return { ...shopInfo, success: true };
         } catch (error) {
             return {
@@ -479,14 +479,14 @@ class Bill {
                 }
             });
             const priceListData = await priceList.json();
-    
+
             if (!priceListData.success || priceListData.totalItems === 0) {
                 return {
                     success: false,
                     message: priceListData.message || "No price lists available"
                 };
             }
-            
+
             const priceListInfo = priceListData.priceList.find(price => price.priceListID == this.priceList);
             if (!priceListInfo) {
                 return {
@@ -494,7 +494,7 @@ class Bill {
                     message: "Price list not found"
                 };
             }
-    
+
             return { ...priceListInfo, success: true };
         } catch (error) {
             return {
@@ -507,7 +507,7 @@ class Bill {
     #getAttachedDocuments = () => {
         try {
             // this.#validateAttachedDocuments(document);
-            if(this.attachedDocuments.length === 0){
+            if (this.attachedDocuments.length === 0) {
                 return {
                     success: true,
                     attachedDocuments: []
@@ -542,7 +542,7 @@ class Bill {
 
             return attachedDocumentsResponse;
 
-        }catch(error){
+        } catch (error) {
             console.log(error)
             return {
                 success: false,
@@ -562,18 +562,18 @@ class Bill {
                     'Authorization': `Bearer ${this.apiKey}`
                 }
             });
-    
+
             const storageData = await storage.json();
-    
+
             if (!storageData.success || storageData.totalItems === 0) {
                 return {
                     success: false,
                     message: storageData.message || "No storage available"
                 };
             }
-    
+
             const storageInfo = storageData.storageList.find(storage => storage.code === this.storage);
-    
+
             if (!storageInfo) {
                 return {
                     success: false,
@@ -588,29 +588,29 @@ class Bill {
                 "active": storageInfo.active,
             }
 
-            console.log({storageResponse});
+            console.log({ storageResponse });
 
-            if(storageResponse.active != "S"){
+            if (storageResponse.active != "S") {
                 return {
                     success: false,
                     message: "Storage is inactive"
                 }
             }
-            
+
             storageResponse.success = true;
             // console.log({storageResponse});
 
             const response = {
-                "code": "",   
-                "motive": "", 
-                "storageAnalysis": {  
-                  "accountNumber": "",
-                  "businessCenter": "",
-                  "classifier01": "",
-                  "classifier02": ""
+                "code": "",
+                "motive": "",
+                "storageAnalysis": {
+                    "accountNumber": "",
+                    "businessCenter": "",
+                    "classifier01": "",
+                    "classifier02": ""
                 }
             }
-            return { success : true, storage : response}
+            return { success: true, storage: response }
             // return storageResponse;
         } catch (error) {
             return {
@@ -619,15 +619,15 @@ class Bill {
             };
         }
     }
-    #getBusinessAnalysis = async () =>{
+    #getBusinessAnalysis = async () => {
 
         try {
             let skip = false;
             let paginationInfo = this.#getPagintation();
             let data;
-            let {currentPageNumber, totalItems,totalPossibleIterations, itemsPerPage} = paginationInfo;
-            while(!skip) {
-                const businessAnalysisURL = `${process.env.SALE_API_URL}GetDocumentAnalysis?itemsPerPage=${itemsPerPage}&pageNumber=${currentPageNumber}`;                
+            let { currentPageNumber, totalItems, totalPossibleIterations, itemsPerPage } = paginationInfo;
+            while (!skip) {
+                const businessAnalysisURL = `${process.env.SALE_API_URL}GetDocumentAnalysis?itemsPerPage=${itemsPerPage}&pageNumber=${currentPageNumber}`;
                 const businessAnalysis = await fetch(businessAnalysisURL, {
                     method: 'GET',
                     headers: {
@@ -637,7 +637,7 @@ class Bill {
                 });
                 const businessAnalysisData = await businessAnalysis.json();
                 if (businessAnalysisData.totalItems === 0) {
-                    console.log({"NOTpass": "NOTpass"});
+                    console.log({ "NOTpass": "NOTpass" });
                     return {
                         success: false,
                         message: businessAnalysisData.message || "No business analysis available"
@@ -655,14 +655,14 @@ class Bill {
                     data = businessAnalysisInfo;
                     skip = true;
                 }
-                    
+
                 currentPageNumber++;
 
-                
-                if(totalPossibleIterations < currentPageNumber){
+
+                if (totalPossibleIterations < currentPageNumber) {
                     skip = true;
                 }
-                
+
             }
 
             if (!data) {
@@ -671,12 +671,12 @@ class Bill {
                     message: "Business analysis not found"
                 };
             }
-            const {analysisDetail} = data;
-            const clientAnalysis  = analysisDetail.find(analysis => analysis.analysisType === "CLT");
-            const taxeAnalysis  = analysisDetail.find(analysis => analysis.analysisType === "IMP");
-            const saleAnalysis  = analysisDetail.find(analysis => analysis.analysisType === "VTA");
+            const { analysisDetail } = data;
+            const clientAnalysis = analysisDetail.find(analysis => analysis.analysisType === "CLT");
+            const taxeAnalysis = analysisDetail.find(analysis => analysis.analysisType === "IMP");
+            const saleAnalysis = analysisDetail.find(analysis => analysis.analysisType === "VTA");
 
-            if(!clientAnalysis || !taxeAnalysis || !saleAnalysis) {
+            if (!clientAnalysis || !taxeAnalysis || !saleAnalysis) {
                 return {
                     success: false,
                     message: "Client, sale or tax analysis not found"
@@ -684,15 +684,17 @@ class Bill {
             }
             const businessCenterCode = this.#getBusinessCenterCode(this.businessCenter);
 
-            if(!businessCenterCode.success) {
+            if (!businessCenterCode.success) {
                 return {
                     success: false,
                     message: businessCenterCode.message || "Business center not found"
                 };
             }
             const saleBusinessCenter = await this.#getSaleBusinessCenterAccounts(businessCenterCode.code);
-            if(!saleBusinessCenter.success) {
-                console.log({"NOTpass": "NOTpass"});
+            console.log("esto falla por la cara")
+            console.log(saleBusinessCenter);
+            if (!saleBusinessCenter.success) {
+                console.log({ "NOTpass": "NOTpass" });
                 console.log(saleBusinessCenter);
                 return {
                     success: false,
@@ -719,7 +721,7 @@ class Bill {
                     "classifier02": ""
                 }
             }
-                           
+
             return { businessAnalysis, success: true };
         } catch (error) {
             return {
@@ -727,10 +729,10 @@ class Bill {
                 // message: "Failed to fetch business analysis data"
                 message: error.message || "Failed to fetch business analysis data"
             };
-        }       
+        }
     }
     #getBusinessCenterCode = (businessCenterName) => {
-        try{
+        try {
 
             //CHECK IF businessCenterName IS a valid string
             if (typeof businessCenterName !== 'string' || businessCenterName.trim() === '') {
@@ -742,11 +744,11 @@ class Bill {
             const saleAccounts_businessCenter = [
                 {
                     code: "EMPNEGVTAVTA000",
-                    desc: ["VNT","VENTA","VENTAS"],
+                    desc: ["VNT", "VENTA", "VENTAS"],
                 },
                 {
                     code: "EMPNEGVTACCP000",
-                    desc: ["CNP","CONCEPCION"],
+                    desc: ["CNP", "CONCEPCION"],
                 }
             ];
             businessCenterName = businessCenterName.trim().toUpperCase();
@@ -758,7 +760,7 @@ class Bill {
                 return {
                     success: false,
                     message: `Business center: ${businessCenterName} not found`
-                    
+
                 };
             }
 
@@ -766,7 +768,7 @@ class Bill {
                 code: foundBusinessCenter.code,
                 success: true
             }
-        }catch(error){
+        } catch (error) {
             console.log(error)
             return {
                 success: false,
@@ -775,9 +777,9 @@ class Bill {
         }
     }
     #getDetailsList = async (saleAnalysis) => {
-        try{
+        try {
             const details = this.details;
-            if(details.length === 0){
+            if (details.length === 0) {
                 return {
                     success: false,
                     message: "No details available"
@@ -785,8 +787,8 @@ class Bill {
             }
             //validar elementos del array proporcionado son correctos
             const invalidDetail = details.find(detail => {
-                return !detail.code || typeof detail.code !== "string" || 
-                       detail.quantity === undefined || !Number.isFinite(detail.quantity) ;
+                return !detail.code || typeof detail.code !== "string" ||
+                    detail.quantity === undefined || !Number.isFinite(detail.quantity);
             });
             if (invalidDetail) {
                 return {
@@ -795,49 +797,49 @@ class Bill {
                 };
             }
             //obtener todos los productos asociados a la empresa
-            const products = await this.#getProducts(); 
-            if(!products.success) {
+            const products = await this.#getProducts();
+            if (!products.success) {
                 return {
                     success: false,
                     message: products.message
                 };
             }
-            const {productList} = products;
+            const { productList } = products;
             const find70724043633542 = productList.find(product => product.code === "70724043633542");
             console.log("PINKKKKKKKKKKKKKKKKKKKKKK", find70724043633542);
             //verificar que los productos de los detalles existen en la lista de productos
             const productCodes = productList.map(product => product.code);
             let detailList = [];
 
-            console.log({details});
+            console.log({ details });
             details.forEach((detail) => {
 
-                if(detail.quantity <= 0 ){
+                if (detail.quantity <= 0) {
                     return;
                 }
 
                 const productInfo = productList.find(product => product.code == detail.code);
-                console.log({productInfo});
+                console.log({ productInfo });
                 if (!productInfo) {
                     return {
                         success: false,
                         message: `Product with code ${detail.code} not found in the product list`
                     };
-                } 
+                }
 
                 const price = detail.price != 0 ? detail.price : productInfo.sellPrice;
 
                 detailList.push({
-                    "type" : "A",
-                    "isExempt" : false,
-                    "code": productInfo.code, 
-                    "count": detail.quantity,  
-                    "productName": productInfo.name, 
+                    "type": "A",
+                    "isExempt": false,
+                    "code": productInfo.code,
+                    "count": detail.quantity,
+                    "productName": productInfo.name,
                     "productNameBarCode": "",
-                    "price": price, 
+                    "price": price,
                     "discount": {
-                      "type": 0,
-                      "value": 0
+                        "type": 0,
+                        "value": 0
                     },
                     "unit": productInfo.unit,  // UNIDAD DEL PRODUCTO
                     "analysis": saleAnalysis,
@@ -851,7 +853,7 @@ class Bill {
                 success: true,
                 detailList: detailList
             };
-        }catch(error){
+        } catch (error) {
             console.log(error)
             return {
                 success: false,
@@ -871,9 +873,9 @@ class Bill {
                     'Authorization': `Bearer ${this.apiKey}`
                 }
             });
-    
+
             const productsData = await prods.json();
-    
+
             if (!productsData.success || productsData.totalItems === 0) {
                 return {
                     success: false,
@@ -887,8 +889,8 @@ class Bill {
 
             let allProducts = productsData.productList;
 
-            if(paginationInfo.totalPossibleIterations > 1){
-                for(let i = 2; i <= paginationInfo.totalPossibleIterations; i++){
+            if (paginationInfo.totalPossibleIterations > 1) {
+                for (let i = 2; i <= paginationInfo.totalPossibleIterations; i++) {
                     const productsURL = `${process.env.SALE_API_URL}Getproducts?status=0&itemsPerPage=10&pageNumber=${i}`;
                     const prods = await fetch(productsURL, {
                         method: 'GET',
@@ -897,9 +899,9 @@ class Bill {
                             'Authorization': `Bearer ${this.apiKey}`
                         }
                     });
-            
+
                     const productsData = await prods.json();
-            
+
                     if (!productsData.success || productsData.totalItems === 0) {
                         return {
                             success: false,
@@ -936,10 +938,10 @@ class Bill {
         }
     }
 
-     #getGlobalDiscount(){
+    #getGlobalDiscount() {
         try {
             return [
-                
+
             ];
         } catch (error) {
             return {
@@ -949,57 +951,189 @@ class Bill {
         }
     }
 
+    #accountingInfo() {
+
+        return {
+            "businessCentersData": {
+                "success": true,
+                "message": "Centros de negocio obtenidos correctamente",
+                "exceptionMessage": null,
+                "centrosNegocios": [
+                    {
+                        "code": "EMP000000000000",
+                        "description": "EMPRESA",
+                        "imputable": "N",
+                        "activo": "S",
+                        "descendientes": [
+                            {
+                                "code": "EMPGES000000000",
+                                "description": "AREAS DE GESTION",
+                                "imputable": "N",
+                                "activo": "S",
+                                "descendientes": [
+                                    {
+                                        "code": "EMPGESGES000000",
+                                        "description": "AREAS DE GESTION",
+                                        "imputable": "N",
+                                        "activo": "S",
+                                        "descendientes": [
+                                            {
+                                                "code": "EMPGESGESADM000",
+                                                "description": "ADMINISTRACION",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            },
+                                            {
+                                                "code": "EMPGESGESGER000",
+                                                "description": "GERENCIA",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            },
+                                            {
+                                                "code": "EMPGESGESLOG000",
+                                                "description": "LOGISTICA",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            },
+                                            {
+                                                "code": "EMPGESGESOPE000",
+                                                "description": "OPERACIONES",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "code": "EMPNEG000000000",
+                                "description": "AREAS DE NEGOCIOS",
+                                "imputable": "N",
+                                "activo": "S",
+                                "descendientes": [
+                                    {
+                                        "code": "EMPNEGPRO000000",
+                                        "description": "PROYECTOS",
+                                        "imputable": "N",
+                                        "activo": "S",
+                                        "descendientes": [
+                                            {
+                                                "code": "EMPNEGPRO001000",
+                                                "description": "PROYECTO ESPECIFICO 1",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            },
+                                            {
+                                                "code": "EMPNEGPRO002000",
+                                                "description": "PROYECTO ESPECIFICO 2",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "EMPNEGSER000000",
+                                        "description": "SERVICIOS",
+                                        "imputable": "N",
+                                        "activo": "S",
+                                        "descendientes": [
+                                            {
+                                                "code": "EMPNEGSERSER000",
+                                                "description": "SERVICIOS",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "EMPNEGVTA000000",
+                                        "description": "VENTAS",
+                                        "imputable": "N",
+                                        "activo": "N",
+                                        "descendientes": [
+                                            {
+                                                "code": "EMPNEGVTACCP000",
+                                                "description": "CONCEPCION",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            },
+                                            {
+                                                "code": "EMPNEGVTAVTA000",
+                                                "description": "VENTAS",
+                                                "imputable": "S",
+                                                "activo": "S",
+                                                "descendientes": null
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+
     #getSaleBusinessCenterAccounts = async (businessCenterCode) => {
         try {
-            const businessCentersURL = `${process.env.ACCOUNTING_API_URL_PROD}GetBusinessCenterPlan`;
-            const businessCenters = await fetch(businessCentersURL, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`
-                }
-            });
-            const businessCentersData = await businessCenters.json();
+            // const businessCentersURL = `${process.env.ACCOUNTING_API_URL_PROD}GetBusinessCenterPlan`;
+            // const businessCenters = await fetch(businessCentersURL, {
+            //     method: 'GET',
+            //     headers: {
+            //         'Content-Type': 'application/json',
+            //         'Authorization': `Bearer ${this.apiKey}`
+            //     }
+            // });
+            const businessCentersData = this.#accountingInfo().businessCentersData;
 
-            const {centrosNegocios} = businessCentersData;
-        
+            const { centrosNegocios } = businessCentersData;
+
             const allBusinessCenters = centrosNegocios.find(desc => desc.code === "EMP000000000000")
-            ?.descendientes.find((desc) => {
-              return desc.code === "EMPNEG000000000";
-            })
-            ?.descendientes.find((desc) => {
-              return desc.code === "EMPNEGVTA000000";
-            })?.descendientes
+                ?.descendientes.find((desc) => {
+                    return desc.code === "EMPNEG000000000";
+                })
+                ?.descendientes.find((desc) => {
+                    return desc.code === "EMPNEGVTA000000";
+                })?.descendientes
 
-            if(!allBusinessCenters || allBusinessCenters.length === 0) {
+            if (!allBusinessCenters || allBusinessCenters.length === 0) {
                 return {
                     success: false,
                     message: "Business center not found"
                 };
             }
-            
+
             const expectedBusinessCenter = allBusinessCenters.find((desc) => {
                 return desc.code === businessCenterCode;
             });
-
-            if(!expectedBusinessCenter) {
+            if (!expectedBusinessCenter) {
                 return {
                     success: false,
                     message: `Business center: ${businessCenterCode} not found`
                 };
             }
 
-            if(expectedBusinessCenter.activo !== "S" || expectedBusinessCenter.imputable !== "S"){
+            if (expectedBusinessCenter.activo !== "S" || expectedBusinessCenter.imputable !== "S") {
                 return {
                     success: false,
                     message: `Business center: ${businessCenterCode} is inactive or not imputable`
                 };
             }
-            
 
-            const needClassifier = await this.#needClassifier(expectedBusinessCenter.code);
 
-            if(!needClassifier.success) {
+            const needClassifier = await this.#needClassifier(expectedBusinessCenter.code).classifierAnalysisData;
+           
+            if (!needClassifier.success) {
+                
                 return {
                     success: false,
                     message: needClassifier.message
@@ -1017,9 +1151,50 @@ class Bill {
         }
     }
 
+    #needClassifier = (businessCenterCode) => {
+        if (businessCenterCode === "EMPNEGVTACCP000") {
+            return {
+                "classifierAnalysisData": {
+                    "usesClassifier2Analysis": false,
+                    "usesClassifier1Analysis": false,
+                    "usesReferenceCurrencyAnalysis": false,
+                    "usesDocumentAnalysis": false,
+                    "usesFileAnalysis": false,
+                    "usesBussinessCenterAnalysis": false,
+                    "usesBankAnalysis": false,
+                    "success": true,
+                    "message": "",
+                    "exceptionMessage": null
+                }
+            }
 
-    #needClassifier = async (businessCenterCode) => {
-        try{
+        }
+        if (businessCenterCode === "EMPNEGVTAVTA000") {
+            return {
+                "classifierAnalysisData": {
+                    "usesClassifier2Analysis": false,
+                    "usesClassifier1Analysis": false,
+                    "usesReferenceCurrencyAnalysis": false,
+                    "usesDocumentAnalysis": false,
+                    "usesFileAnalysis": false,
+                    "usesBussinessCenterAnalysis": false,
+                    "usesBankAnalysis": false,
+                    "success": true,
+                    "message": "",
+                    "exceptionMessage": null
+                }
+            }
+        }
+
+
+        return { "classifierAnalysisData": {
+            success: false,
+        }}
+    }
+
+
+    #needClassifier_old = async (businessCenterCode) => {
+        try {
             const classifierAnalysisURL = `${process.env.ACCOUNTING_API_URL_PROD}GetAccountAnalisys?Account=${businessCenterCode}`;
             const classifierAnalysis = await fetch(classifierAnalysisURL, {
                 method: 'GET',
@@ -1030,27 +1205,27 @@ class Bill {
             });
             const classifierAnalysisData = await classifierAnalysis.json();
 
-            if(!classifierAnalysisData.success ) {
+            if (!classifierAnalysisData.success) {
                 return {
                     success: false,
                     message: classifierAnalysisData.message || "No classifier analysis available"
                 };
             }
 
-            if(!classifierAnalysisData.usesClassifier2Analysis || !classifierAnalysisData.usesClassifier1Analysis){
+            if (!classifierAnalysisData.usesClassifier2Analysis || !classifierAnalysisData.usesClassifier1Analysis) {
                 return {
                     success: true,
                     message: "Classifier analysis available"
                 };
             }
 
-            if(classifierAnalysisData.usesClassifier2Analysis || classifierAnalysisData.usesClassifier1Analysis){
+            if (classifierAnalysisData.usesClassifier2Analysis || classifierAnalysisData.usesClassifier1Analysis) {
                 return {
                     success: false,
                     message: "Classifier analysis NOT available"
                 };
             }
-        }catch(error){
+        } catch (error) {
             return {
                 success: false,
                 message: "Failed to fetch sale classifier"
@@ -1093,15 +1268,15 @@ class Bill {
 
         const isValid = this.attachedDocuments.every(doc => {
             return typeof doc.folio === "string" &&
-               typeof doc.documentType === "string" &&
-               moment(doc.date, "DD-MM-YYYY", true).isValid();
+                typeof doc.documentType === "string" &&
+                moment(doc.date, "DD-MM-YYYY", true).isValid();
         });
 
         if (!isValid) {
             throw {
-            code: 400,
-            error: "Bad Request",
-            message: "Attached documents must have a valid structure: { folio: 'string', documentType: 'string', date: 'DD-MM-YYYY' }"
+                code: 400,
+                error: "Bad Request",
+                message: "Attached documents must have a valid structure: { folio: 'string', documentType: 'string', date: 'DD-MM-YYYY' }"
             };
         }
     }

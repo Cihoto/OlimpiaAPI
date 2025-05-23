@@ -1,0 +1,128 @@
+{
+    "businessCentersData": {
+        "success": true,
+        "message": "Centros de negocio obtenidos correctamente",
+        "exceptionMessage": null,
+        "centrosNegocios": [
+            {
+                "code": "EMP000000000000",
+                "description": "EMPRESA",
+                "imputable": "N",
+                "activo": "S",
+                "descendientes": [
+                    {
+                        "code": "EMPGES000000000",
+                        "description": "AREAS DE GESTION",
+                        "imputable": "N",
+                        "activo": "S",
+                        "descendientes": [
+                            {
+                                "code": "EMPGESGES000000",
+                                "description": "AREAS DE GESTION",
+                                "imputable": "N",
+                                "activo": "S",
+                                "descendientes": [
+                                    {
+                                        "code": "EMPGESGESADM000",
+                                        "description": "ADMINISTRACION",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    },
+                                    {
+                                        "code": "EMPGESGESGER000",
+                                        "description": "GERENCIA",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    },
+                                    {
+                                        "code": "EMPGESGESLOG000",
+                                        "description": "LOGISTICA",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    },
+                                    {
+                                        "code": "EMPGESGESOPE000",
+                                        "description": "OPERACIONES",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "code": "EMPNEG000000000",
+                        "description": "AREAS DE NEGOCIOS",
+                        "imputable": "N",
+                        "activo": "S",
+                        "descendientes": [
+                            {
+                                "code": "EMPNEGPRO000000",
+                                "description": "PROYECTOS",
+                                "imputable": "N",
+                                "activo": "S",
+                                "descendientes": [
+                                    {
+                                        "code": "EMPNEGPRO001000",
+                                        "description": "PROYECTO ESPECIFICO 1",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    },
+                                    {
+                                        "code": "EMPNEGPRO002000",
+                                        "description": "PROYECTO ESPECIFICO 2",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    }
+                                ]
+                            },
+                            {
+                                "code": "EMPNEGSER000000",
+                                "description": "SERVICIOS",
+                                "imputable": "N",
+                                "activo": "S",
+                                "descendientes": [
+                                    {
+                                        "code": "EMPNEGSERSER000",
+                                        "description": "SERVICIOS",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    }
+                                ]
+                            },
+                            {
+                                "code": "EMPNEGVTA000000",
+                                "description": "VENTAS",
+                                "imputable": "N",
+                                "activo": "N",
+                                "descendientes": [
+                                    {
+                                        "code": "EMPNEGVTACCP000",
+                                        "description": "CONCEPCION",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    },
+                                    {
+                                        "code": "EMPNEGVTAVTA000",
+                                        "description": "VENTAS",
+                                        "imputable": "S",
+                                        "activo": "S",
+                                        "descendientes": null
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+}
