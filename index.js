@@ -2,8 +2,9 @@ import express from 'express';
 import dotenv from 'dotenv';
 import bodyParser from 'body-parser';
 import { authMiddleware } from './src/middleware/auth.js';
-import { getAllCoinsId,getAllPaymentsConditions,getShops, getPriceList,getPriceListDetails ,getDocumentAnalysis,getClients,
-  getClientByFileId,sellersId,getProds,getStorages, businessAnalysis,paymentConditions,businessCenters,classifierAnalysis
+import {
+  getAllCoinsId, getAllPaymentsConditions, getShops, getPriceList, getPriceListDetails, getDocumentAnalysis, getClients,
+  getClientByFileId, sellersId, getProds, getStorages, businessAnalysis, paymentConditions, businessCenters, classifierAnalysis
 } from './src/utils/sales.js';
 import billsRoutes from './src/routes/bills.js';
 import helpersRoutes from './src/routes/helpers.js';
@@ -33,18 +34,31 @@ app.use(cors());
 // Auth middleware
 app.use(authMiddleware);
 
-app.use('/api',billsRoutes);
-app.use('/helpers',helpersRoutes);
-app.use('/bot',botRoutes);
-app.use('/dev',devRoutes);
+app.use('/api', billsRoutes);
+app.use('/helpers', helpersRoutes);
+app.use('/bot', botRoutes);
+app.use('/dev', devRoutes);
 
 // app.use('/google',googleRoutes)
 // Routes
 app.get('/', async (req, res) => {
 
-  if(!req.apiKey) {
+  if (!req.apiKey) {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });
   }
+  // const { apiKey } = req;
+  // const clientURL = `https://replapi.defontana.com/api/Sale/GetClientsByFileID?fileId=77.732.169-2&status=1&itemsPerPage=10&pageNumber=1`;
+  // const client = await fetch(clientURL, {
+  //   method: 'GET',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     'Authorization': `Bearer ${apiKey}`
+  //   }
+  // });
+  // const clientData = await client.json();
+
+  // res.json({ apiKey: req.apiKey,clientData:clientData });
+  // return
 
 
   // res.json({message:"Hello World, this is your api token " + req.apiKey});
@@ -56,15 +70,15 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  const communityResponse =  findDeliveryDayByComuna("RECOLETA","2025-05-23T10:15:01Z");
+  const communityResponse = findDeliveryDayByComuna("LO BARNECHEA","2025-05-23T02:15:56.000Z");
   console.log("communityResponse", communityResponse);
   res.json(communityResponse);
 
   return 
 
-  if(!req.apiKey) {
-    return res.status(500).json({ error: 'Error al autenticar la solicitud' });
-  }
+  // if(!req.apiKey) {
+  //   return res.status(500).json({ error: 'Error al autenticar la solicitud' });
+  // }
 
   // const allCoins = await getAllCoinsId(req.apiKey)
   // const allPayments = await getAllPaymentsConditions(req.apiKey)
@@ -73,42 +87,42 @@ app.get('/', async (req, res) => {
   // const getPriceListDetail = await getPriceListDetails(req.apiKey)
   // const documentAnalysis = await getDocumentAnalysis(req.apiKey)
   // const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
-  // const getClientFromId = await getClientByFileId(req.apiKey,"76.322.465-1")
-  const sellersIdd = await sellersId(req.apiKey) 
+  const getClientFromId = await getClientByFileId(req.apiKey, "77.732.169-2")
+  // const sellersIdd = await sellersId(req.apiKey) 
   // const getProdss = await getProds(req.apiKey)
   // const getStoragess = await getStorages(req.apiKey)
   // const businessAnalysiss = await businessAnalysis(req.apiKey);// api/Sale/GetDocumentAnalisys
   // const codess = allPayments.items.map((desc) => desc.code);
-  res.json({sellersIdd});
-  return 
-  const businessCenter =  await businessCenters(req.apiKey) //preguntar por API //api/Accounting/GetBusinessCenterPlan
+  res.json({ getClientFromId });
+  return
+  const businessCenter = await businessCenters(req.apiKey) //preguntar por API //api/Accounting/GetBusinessCenterPlan
   const saleBusinessCenterAccounts = {
-    defaultSale : "EMPNEGVTAVTA000",
-    CNPSale : "EMPNEGVTACCP000"
+    defaultSale: "EMPNEGVTAVTA000",
+    CNPSale: "EMPNEGVTACCP000"
   }
-  const classifierAnalysiss =  await classifierAnalysis(req.apiKey,saleBusinessCenterAccounts.defaultSale) //preguntar por API //api/Accounting/GetBusinessCenterPlan
+  const classifierAnalysiss = await classifierAnalysis(req.apiKey, saleBusinessCenterAccounts.defaultSale) //preguntar por API //api/Accounting/GetBusinessCenterPlan
   // const paymentConditionss = await  paymentConditions(req.apiKey); // api/Sale/GetPaymentConditions
-  
+
   res.json(businessCenter)
   return
   // businessCenterLogic
-  const {centrosNegocios} = businessCenter;
+  const { centrosNegocios } = businessCenter;
 
   const expectedBusinessCenter = centrosNegocios.find(desc => desc.code === "EMP000000000000")
-  ?.descendientes.find((desc) => {
-    return desc.code === "EMPNEG000000000";
-  })
-  ?.descendientes.find((desc) => {
-    return desc.code === "EMPNEGVTA000000";
-  })?.descendientes
+    ?.descendientes.find((desc) => {
+      return desc.code === "EMPNEG000000000";
+    })
+    ?.descendientes.find((desc) => {
+      return desc.code === "EMPNEGVTA000000";
+    })?.descendientes
 
   const codes = centrosNegocios.map((desc) => desc.code);
   console.log(businessCenter);
 
   res.json(expectedBusinessCenter);
-  return 
-    
-  
+  return
+
+
   // res.json({businessCenter});  
   // return
   const bill = new Bill();
@@ -120,7 +134,7 @@ app.get('/', async (req, res) => {
   // const reponse = await bill.getPriceList();
   res.json(response);
   return
-  
+
   // res.json(moneyTypesData);
 
   res.send('Hello World, this is your api token ' + req.apiKey);

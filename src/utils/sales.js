@@ -96,7 +96,7 @@ const getClients = async(apiKey) =>{
     return clientsData;
 }
 const getClientByFileId= async(apiKey,fileId) =>{
-    const clientURL = `https://replapi.defontana.com/api/Sale/GetClientsByFileID?fileId=${fileId}&status=1 &itemsPerPage=10&pageNumber=1`;
+    const clientURL = `https://api.defontana.com/api/Sale/GetClientsByFileID?fileId=${fileId}&status=1&itemsPerPage=10&pageNumber=1`;
     const client = await fetch(clientURL, {
         method: 'GET',
         headers: {

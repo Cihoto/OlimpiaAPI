@@ -259,14 +259,14 @@ class Bill {
     #getSellerInfo = async () => {
         try {
 
-            const sellersURL = `https://api.defontana.com/api/sale/GetSellers?itemsPerPage=100&pageNumber=1`;
+            const sellersURL = `${process.env.SALE_API_URL}GetSellers?itemsPerPage=100&pageNumber=1`;
             const sellers = await fetch(sellersURL, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.apiKey}`
                 }
-            });
+            }); 
 
             // check if response is ok
             if (!sellers.ok) {
@@ -951,7 +951,7 @@ class Bill {
 
     #getSaleBusinessCenterAccounts = async (businessCenterCode) => {
         try {
-            const businessCentersURL = `https://api.defontana.com/api/Accounting/GetBusinessCenterPlan`;
+            const businessCentersURL = `${process.env.ACCOUNTING_API_URL_PROD}GetBusinessCenterPlan`;
             const businessCenters = await fetch(businessCentersURL, {
                 method: 'GET',
                 headers: {
@@ -1020,7 +1020,7 @@ class Bill {
 
     #needClassifier = async (businessCenterCode) => {
         try{
-            const classifierAnalysisURL = `https://api.defontana.com/api/Accounting/GetAccountAnalisys?Account=${businessCenterCode}`;
+            const classifierAnalysisURL = `${process.env.ACCOUNTING_API_URL_PROD}GetAccountAnalisys?Account=${businessCenterCode}`;
             const classifierAnalysis = await fetch(classifierAnalysisURL, {
                 method: 'GET',
                 headers: {

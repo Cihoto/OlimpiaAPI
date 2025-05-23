@@ -79,6 +79,8 @@ async function createBill(req, res) {
         bill.validate();
         const BILLJSON = await bill.toJSON();
         const filePath = path.resolve('./src/controllers/bills.json');
+        // res.json(BILLJSON);
+        // return
         // res.json(filePath)
         // return 
 
@@ -92,7 +94,7 @@ async function createBill(req, res) {
 
         fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
 
-        //to here 
+        // to here 
         // console.log(BILLJSON);
         // res.status(200).json({
         //     success: true,
@@ -142,7 +144,7 @@ async function createBill(req, res) {
 
         // console.log("mapped", mapped);
     } catch (error) {
-        console.error('Error creating billsdasdasd:', error);
+        console.error('Error creating bill:', error);
         if (error.code && error.message) {
             res.status(error.code).json({
                 ...error,

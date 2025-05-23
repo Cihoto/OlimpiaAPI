@@ -457,7 +457,11 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailD
                         if (deliveryDay != null) {
                             results[0]['deliveryDay'] = `${deliveryDay}`;
                         }else{
-                            results[0]['deliveryDay'] = "";
+                            if(results[0]['Dirección Despacho'].toLowerCase() == "retiro"){
+                                results[0]['deliveryDay'] = moment().add(1, 'days').format('YYYY-MM-DD');
+                            }else{
+                                results[0]['deliveryDay'] = "";
+                            }
                         }
                         resolve({
                             data: results[0],

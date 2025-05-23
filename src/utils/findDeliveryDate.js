@@ -170,15 +170,18 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                     dayName: day.dayName
                 }
             });
-
         deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
-        console.log("deliveryDayIndexes", deliveryDayIndexes);
+        
         let deliveryIndex = null;
-
-        const emailDateDayIndex = moment(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ').day();
+        // Convert emailDate to Chile timezone and get the day index
+        emailDate = moment.tz(emailDate, 'America/Santiago');
+        console.log(`Debe ser traido a la zona horaria de Chile ${emailDate}`);
+        const emailDateDayIndex = emailDate.day();
+       
         // Solo obtener la hora local de la fecha sin convertir a otra zona horaria
         // Obtener la hora en horario chileno (America/Santiago)
-        const emailDateHour = moment.tz(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ', 'America/Santiago').hour();
+        // const emailDateHour = moment.tz(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ', 'America/Santiago').hour();
+        const emailDateHour = emailDate.hour();
         const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
 
         //encontrar el proximo indice de entrega
@@ -216,7 +219,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
             // if (deliveryDayIndex > emailDateDayIndex) {
 
-                console.log("________________________________SEPARATOR_______________________________________________")
+                
 
                 deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
 
