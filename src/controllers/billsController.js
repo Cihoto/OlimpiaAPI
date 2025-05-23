@@ -102,7 +102,7 @@ async function createBill(req, res) {
         // });
         // return
 
-        const saveSaleURL = `${SALE_API_URL}SaveSale`
+        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
         console.log("saveSaleURL", saveSaleURL);
         const createBillDefontana = await fetch(saveSaleURL, {
             method: 'POST',
