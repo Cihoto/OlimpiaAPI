@@ -46,19 +46,19 @@ app.get('/', async (req, res) => {
   if (!req.apiKey) {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });
   }
-  // const { apiKey } = req;
-  // const clientURL = `https://replapi.defontana.com/api/Sale/GetClientsByFileID?fileId=77.732.169-2&status=1&itemsPerPage=10&pageNumber=1`;
-  // const client = await fetch(clientURL, {
-  //   method: 'GET',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //     'Authorization': `Bearer ${apiKey}`
-  //   }
-  // });
-  // const clientData = await client.json();
+  const { apiKey } = req;
+  const clientURL = `https://api.defontana.com/api/Sale/GetClientsByFileID?fileId=77.732.169-2&status=1&itemsPerPage=10&pageNumber=1`;
+  const client = await fetch(clientURL, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    }
+  });
+  const clientData = await client.json();
 
-  // res.json({ apiKey: req.apiKey,clientData:clientData });
-  // return
+  res.json({ apiKey: req.apiKey,clientData:clientData });
+  return
 
 
   // res.json({message:"Hello World, this is your api token " + req.apiKey});
@@ -70,7 +70,7 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  const communityResponse = findDeliveryDayByComuna("LO BARNECHEA","2025-05-23T02:15:56.000Z");
+  const communityResponse = findDeliveryDayByComuna("LO BARNECHEA","2025-05-23T20:15:56.000Z");
   console.log("communityResponse", communityResponse);
   res.json(communityResponse);
 

@@ -2707,5 +2707,569 @@
     "gloss": "josé luis araneda 20",
     "customFields": [],
     "isTransferDocument": false
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250523101139",
+    "emissionDate": {
+      "day": "26",
+      "month": "5",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "25",
+      "month": "6",
+      "year": "2025"
+    },
+    "clientFile": "81.537.600-5",
+    "contactIndex": "Cerro El Plomo 5680 Piso 11. Las Condes. Santiago.",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "LAS CONDES",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "23",
+          "month": "5",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "4800332540",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 1,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 4,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "70724043633542",
+        "count": 1,
+        "productName": "Franuí Chocolate Pink Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "santa maria (av santa maria 6940)",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250523101247",
+    "emissionDate": {
+      "day": "26",
+      "month": "5",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "25",
+      "month": "6",
+      "year": "2025"
+    },
+    "clientFile": "81.537.600-5",
+    "contactIndex": "Cerro El Plomo 5680 Piso 11. Las Condes. Santiago.",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "LAS CONDES",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "23",
+          "month": "5",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "4800332540",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 1,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 4,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "70724043633542",
+        "count": 1,
+        "productName": "Franuí Chocolate Pink Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "santa maria (av santa maria 6940)",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250523101307",
+    "emissionDate": {
+      "day": "26",
+      "month": "5",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "25",
+      "month": "6",
+      "year": "2025"
+    },
+    "clientFile": "81.537.600-5",
+    "contactIndex": "Cerro El Plomo 5680 Piso 11. Las Condes. Santiago.",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "LAS CONDES",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "23",
+          "month": "5",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "4800332540",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 1,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 4,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "70724043633542",
+        "count": 1,
+        "productName": "Franuí Chocolate Pink Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "santa maria (av santa maria 6940)",
+    "customFields": [],
+    "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250523101638",
+    "emissionDate": {
+      "day": "26",
+      "month": "5",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "25",
+      "month": "6",
+      "year": "2025"
+    },
+    "clientFile": "81.537.600-5",
+    "contactIndex": "Cerro El Plomo 5680 Piso 11. Las Condes. Santiago.",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FNASSAR",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "LAS CONDES",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [
+      {
+        "date": {
+          "day": "23",
+          "month": "5",
+          "year": "2025"
+        },
+        "documentTypeId": "801",
+        "folio": "4800332540",
+        "reason": ""
+      }
+    ],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 1,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 4,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "70724043633542",
+        "count": 1,
+        "productName": "Franuí Chocolate Pink Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 81576,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "santa maria (av santa maria 6940)",
+    "customFields": [],
+    "isTransferDocument": true
   }
 ]
