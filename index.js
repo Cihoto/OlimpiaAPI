@@ -46,27 +46,27 @@ app.get('/', async (req, res) => {
   if (!req.apiKey) {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });
   }
-  const BILLJSON = {
-    "aaaa": "string"
-  }
-  const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-  console.log("saveSaleURL", saveSaleURL);
-  const createBillDefontana = await fetch(saveSaleURL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${req.apiKey}`
-    },
-    body: JSON.stringify(BILLJSON)
-  });
+  // const BILLJSON = {
+  //   "aaaa": "string"
+  // }
+  // const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
+  // console.log("saveSaleURL", saveSaleURL);
+  // const createBillDefontana = await fetch(saveSaleURL, {
+  //   method: 'POST',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     Authorization: `Bearer ${req.apiKey}`
+  //   },
+  //   body: JSON.stringify(BILLJSON)
+  // });
 
-  const createBillDefontanaResponse = await createBillDefontana.json();
-  console.log("createBillDefontanaResponse", createBillDefontanaResponse);
-  res.status(200).json({
-    createBillDefontanaResponse,
-    success: true,
-    data: BILLJSON
-  });
+  // const createBillDefontanaResponse = await createBillDefontana.json();
+  // console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+  // res.status(200).json({
+  //   createBillDefontanaResponse,
+  //   success: true,
+  //   data: BILLJSON
+  // });
   // const { apiKey } = req;
   // const clientURL = `https://api.defontana.com/api/Sale/GetClientsByFileID?fileId=77.732.169-2&status=1&itemsPerPage=10&pageNumber=1`;
   // const client = await fetch(clientURL, {
