@@ -397,7 +397,7 @@ async function integrateWithChatGPT(addresses, targetAddress) {
         model: "gpt-4o-mini",
         input: prompt
     });
-
+    
     try {
         const sanitizedOutput = response.output_text.trim().replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
         const validJson = JSON.parse(sanitizedOutput);

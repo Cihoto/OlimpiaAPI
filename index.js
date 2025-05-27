@@ -92,11 +92,13 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  // const communityResponse = findDeliveryDayByComuna("LO BARNECHEA", "2025-05-23T20:15:56.000Z");
-  // console.log("communityResponse", communityResponse);
-  // res.json(communityResponse);
+  // const communityResponse = findDeliveryDayByComuna("Providencia", "2025-05-23T20:15:56.000Z");
+  	// 26-05-2025 09:57:50
+  const communityResponse = findDeliveryDayByComuna("Providencia", "2025-05-26T22:57:50Z");
+  console.log("communityResponse", communityResponse);
+  res.json(communityResponse);
 
-  // return
+  return
 
   // if(!req.apiKey) {
   //   return res.status(500).json({ error: 'Error al autenticar la solicitud' });

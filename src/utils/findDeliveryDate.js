@@ -171,6 +171,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 }
             });
         deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
+        console.log("deliveryDayIndexes", deliveryDayIndexes);
         
         let deliveryIndex = null;
         // Convert emailDate to Chile timezone and get the day index
@@ -184,13 +185,15 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const emailDateHour = emailDate.hour();
         const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
 
+        let daysForNextDelivery = null;
+
         //encontrar el proximo indice de entrega
         for (let i = 0; i < deliveryDayIndexes.length; i++) {
             // console.log("deliveryDayIndexes", deliveryDayIndexes[i]);
             const deliveryDayIndex = deliveryDayIndexes[i].index;
 
             if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
-
+                console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
                 // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
                 deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
                 break;
@@ -220,9 +223,9 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             // if (deliveryDayIndex > emailDateDayIndex) {
 
                 
-
+                console.log("*************************************************************************")
                 deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
-
+                daysForNextDelivery = deliveryIndex;
                 const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
                 console.log("daysToNextDelivery", daysToNextDelivery)
 
@@ -230,13 +233,14 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
                     break;
                 }
-
+                console.log("ES MENOR A UNO")
+                console.log("emailDateHour", emailDateHour)
                 if (emailDateHour >= 12) {
-                    console.log("laskdejalsdkjalskdjalsd", emailDateHour)
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                    console.log("PASADA LA HORA DE CORTE", emailDateHour)
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 2)
                 } else {
-                    console.log({ emailDateHour })
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                    console.log("ANTES DE LA HORA DE CORTE", emailDateHour)
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
                 }
                 break;
             // }
@@ -251,15 +255,17 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         let date = emailDate;
         // while (deliveryObj.index != deliveryDate || counter <= 10) {
         // while (deliveryObj.index != deliveryDate || counter < 10) {
-        while (deliveryObj.index != deliveryDate) {
-            date = moment(date).add(1, 'day').format("YYYY-MM-DD");
-            const dayOfWeek = moment(date).day();
-            deliveryDate = dayOfWeek;
+        console.log("este es el valor a evaluar", daysForNextDelivery)
+        if(daysForNextDelivery == 0){
+            date = moment(emailDate).add("1",'days').format("YYYY-MM-DD");
+        }else{
+            while (deliveryObj.index != deliveryDate) {
+                date = moment(date).add(1, 'day').format("YYYY-MM-DD");
+                const dayOfWeek = moment(date).day();
+                deliveryDate = dayOfWeek;
+            }
         }
         // const deliveryDate = moment(emailDate).day(deliveryObj.index).format("YYYY/MM/DD");
-        console.log("date", date)
-        console.log("date", date)
-        console.log("date", date)
         console.log("date", date)
         return date
         // return {deliveryIndex, moment(deliveryIndex).format("YYYY/MM/DD HH:mm:ss")};
