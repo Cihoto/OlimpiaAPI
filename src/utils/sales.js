@@ -84,7 +84,7 @@ const getDocumentAnalysis = async (apiKey) => {
 }
 
 const getClients = async(apiKey) =>{
-    const clientsURL = `https://replapi.defontana.com/api/Sale/GetClients?status=1&itemsPerPage=200&pageNumber=2`;
+    const clientsURL = `https://api.defontana.com/api/Sale/GetClients?status=1&itemsPerPage=200&pageNumber=2`;
     const clients = await fetch(clientsURL, {
         method: 'GET',
         headers: {
@@ -93,8 +93,10 @@ const getClients = async(apiKey) =>{
         }
     });
     const clientsData = await clients.json();
+    console.log("clientsData", clientsData);
     return clientsData;
 }
+
 const getClientByFileId= async(apiKey,fileId) =>{
     const clientURL = `https://api.defontana.com/api/Sale/GetClientsByFileID?fileId=${fileId}&status=1&itemsPerPage=10&pageNumber=1`;
     const client = await fetch(clientURL, {

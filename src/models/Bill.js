@@ -112,10 +112,12 @@ class Bill {
                 throw { code: 400, error: "Not Found", message: clientData.message };
             }
 
+            console.log("1. Client Data:", clientData);
             const paymentCondition = this.#checkpaymentCondition();
             if (!paymentCondition.success) {
                 throw { code: 400, error: "Bad Request", message: paymentCondition.message };
             }
+            
 
             // const clientAnalysis = this.#getClientAnalysis();
 
@@ -348,6 +350,9 @@ class Bill {
                 }
             });
             const clientData = await client.json();
+            console.log("📦 Client Data URL:", clientURL);
+            console.log("📦 Client Data:", { clientData });
+
 
             if (!clientData.success || clientData.totalItems === 0) {
                 return {

@@ -5,3 +5,5 @@
 /src/middleware/Credentials
 /src/middleware/googleAuth.js
 /tests
+/prompt
+/problemas.text

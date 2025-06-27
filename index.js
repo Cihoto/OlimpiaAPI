@@ -47,6 +47,8 @@ app.get('/', async (req, res) => {
     return res.status(500).json({ error: 'Error al autenticar la solicitud' });
   }
   const { apiKey } = req;
+
+  
   // const BILLJSON = {
   //   "aaaa": "string"
   // }
@@ -93,12 +95,12 @@ app.get('/', async (req, res) => {
   // return
 
   // const communityResponse = findDeliveryDayByComuna("Providencia", "2025-05-23T20:15:56.000Z");
-  	// 26-05-2025 09:57:50
-  const communityResponse = findDeliveryDayByComuna("Providencia", "2025-05-26T22:57:50Z");
-  console.log("communityResponse", communityResponse);
-  res.json(communityResponse);
+  // 26-05-2025 09:57:50
+  // const communityResponse = findDeliveryDayByComuna("EL BOSQUE", "2025-06-28T08:57:50Z");
+  // console.log("communityResponse", communityResponse);
+  // res.json(communityResponse);
 
-  return
+  // return
 
   // if(!req.apiKey) {
   //   return res.status(500).json({ error: 'Error al autenticar la solicitud' });
@@ -111,13 +113,14 @@ app.get('/', async (req, res) => {
   // const getPriceListDetail = await getPriceListDetails(req.apiKey)
   // const documentAnalysis = await getDocumentAnalysis(req.apiKey)
   // const getClientss = await getClients(req.apiKey) // api/Sale/GetClients
-  // const getClientFromId = await getClientByFileId(req.apiKey, "77.732.169-2")
+  // const getClientFromId = await getClientByFileId(req.apiKey, "76995636-0")
   // const sellersIdd = await sellersId(req.apiKey) 
   // const getProdss = await getProds(req.apiKey)
   // const getStoragess = await getStorages(req.apiKey)
   // const businessAnalysiss = await businessAnalysis(req.apiKey);// api/Sale/GetDocumentAnalisys
   // const codess = allPayments.items.map((desc) => desc.code);
-  // res.json({ businessAnalysiss });
+  // res.json({ getClientFromId });
+  // return
 
 
   // const businessCentersURL = `${process.env.ACCOUNTING_API_URL_DEV}GetBusinessCenterPlan`

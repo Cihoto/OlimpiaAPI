@@ -193,16 +193,26 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             const deliveryDayIndex = deliveryDayIndexes[i].index;
 
             if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
-                console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-                // deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted,emailDateHour)
-                deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+
+                const hasMondayDelivery = deliveryDayIndexes.some(day => day.index === 1);
+
+                console.log("¿La comuna tiene despacho los lunes?", hasMondayDelivery);
+                console.log("¿La comuna tiene despacho los lunes?", hasMondayDelivery);
+                
+                if (hasMondayDelivery) {
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                }else{
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                }
+
                 break;
             }
 
             if (emailDateDayIndex == 5) {
-                console.log("________________________________________________________________________________")
+                console.log("____________________________a____________________________________________________")
 
                 deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
+                // daysForNextDelivery = deliveryIndex;
                 // break;
                 const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
 
@@ -223,7 +233,6 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             // if (deliveryDayIndex > emailDateDayIndex) {
 
                 
-                console.log("*************************************************************************")
                 deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
                 daysForNextDelivery = deliveryIndex;
                 const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);

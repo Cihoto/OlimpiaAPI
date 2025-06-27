@@ -3553,5 +3553,68 @@
     "gloss": "santa maria (av santa maria 6940)",
     "customFields": [],
     "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20250613125157",
+    "emissionDate": {
+      "day": "11",
+      "month": "6",
+      "year": "2025"
+    },
+    "firstFeePaid": {
+      "day": "11",
+      "month": "7",
+      "year": "2025"
+    },
+    "clientFile": "76.871.493-2",
+    "contactIndex": "FRANCISCO DE VILLAGRA 35",
+    "rutMandante": "",
+    "paymentCondition": "CREDITO30",
+    "sellerFileId": "FJAMIS",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "SANTIAGO",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "francisco de villagra 35",
+    "customFields": [],
+    "isTransferDocument": true
   }
 ]
