@@ -97,12 +97,12 @@ async function createBill(req, res) {
         fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
 
         // to here 
-        console.log(BILLJSON);
-        res.status(200).json({
-            success: true,
-            data: BILLJSON
-        });
-        return
+        // console.log(BILLJSON);
+        // res.status(200).json({
+        //     success: true,
+        //     data: BILLJSON
+        // });
+        // return
 
         const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
         console.log("saveSaleURL", saveSaleURL);
