@@ -94,12 +94,12 @@ app.get('/', async (req, res) => {
   // res.json({date});
   // return
 
-  // const communityResponse = findDeliveryDayByComuna("Providencia", "2025-05-23T20:15:56.000Z");
+  const communityResponse = findDeliveryDayByComuna("Las Condes", "2025-07-08T15:15:56.000Z");
   // 26-05-2025 09:57:50
   // const communityResponse = findDeliveryDayByComuna("EL BOSQUE", "2025-06-28T08:57:50Z");
-  // console.log("communityResponse", communityResponse);
-  // res.json(communityResponse);
-
+  console.log("communityResponse", communityResponse);
+  res.json(communityResponse);
+  return;
   // return
 
   // if(!req.apiKey) {

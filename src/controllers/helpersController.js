@@ -420,7 +420,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailD
             fs.createReadStream(CSV)
                 .pipe(csvParser())
                 .on('data', (data) => {
-                    if (data.RUT == normalizedRut) {
+                    if (data.RUT.toLowerCase() == normalizedRut.toLocaleLowerCase()) {
                         results.push(data);
                     } // Collect all rows
                 })

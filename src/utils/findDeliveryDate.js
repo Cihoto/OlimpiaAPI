@@ -223,7 +223,14 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 //     break;
                 // }
                 if (emailDateHour >= 12) {
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                    const hasMondayDelivery = deliveryDayIndexes.some(day => day.index === 1);
+
+                    if(hasMondayDelivery){
+                        deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                    }else{
+                        deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
+                    }
+                    
                 } else {
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
                 }
@@ -235,15 +242,18 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 
                 deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
                 daysForNextDelivery = deliveryIndex;
+
                 const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
-                console.log("daysToNextDelivery", daysToNextDelivery)
+                console.log("______daysToNextDelivery______", daysToNextDelivery);
 
                 if (daysToNextDelivery > 1) {
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
                     break;
                 }
-                console.log("ES MENOR A UNO")
-                console.log("emailDateHour", emailDateHour)
+                
+                console.log("ES MENOR A UNO");
+                console.log("emailDateHour", emailDateHour);
+
                 if (emailDateHour >= 12) {
                     console.log("PASADA LA HORA DE CORTE", emailDateHour)
                     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 2)
@@ -290,7 +300,7 @@ function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDat
     // deliveryIndex = daysToNextDelivery;
     // break
 
-    if (daysToNextDelivery > 1) {
+    if (daysToNextDelivery > 2) {
         return moveForward(deliveryDayIndexes.length, i, 0)
         // break;
     }
@@ -316,7 +326,37 @@ function moveForward(arrayLength, currentIndex, steps) {
 
 function diffToNextDeliveryDay(deliveryDayIndexes, nextIndex, orderDate) {
 
+    console.log("*")
+    console.log("deliveryDayIndexes", deliveryDayIndexes);
+    console.log("nextIndex", nextIndex);
+    console.log("orderDate", orderDate);
+    console.log("*")
+
+    const todayDayIndex = moment(orderDate).day();
+    const todayDeliveryIndexes = deliveryDayIndexes
+        .filter(day => day.index === todayDayIndex)
+        .map(day => day.index);
+    console.log("todayDeliveryIndexes", todayDeliveryIndexes);
+
+    // Buscar el próximo día de entrega en deliveryDayIndexes después de todayDayIndex
+    let minDiff = null;
+
+    for (let d of deliveryDayIndexes) {
+        let diff = (d.index - todayDayIndex + 7) % 7;
+        if (diff === 0) diff = 7; // Si es hoy, cuenta para la próxima semana
+        if (minDiff === null || diff < minDiff) {
+            minDiff = diff;
+        }
+    }
+
+    console.log("minDiff", minDiff);
+    console.log("minDiff", minDiff);
+    console.log("minDiff", minDiff);
+
+    return minDiff;
+
     const nextDeliveryDay = deliveryDayIndexes[nextIndex % deliveryDayIndexes.length];
+    console.log("nextDeliveryDay", nextDeliveryDay);
     // Calculate the next delivery date in the future
     let nextDeliveryDate = moment(orderDate).startOf('day');
 
