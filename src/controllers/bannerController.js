@@ -13,6 +13,8 @@ const BANNED_BUSINESS = [
     "keylogistics",
     "keylogistics.cl",
     "keyLogistics (ESMAX)",
+    ""
+
 ]
 
 async function checkifBusinessIsBanned (req,res){

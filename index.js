@@ -10,6 +10,7 @@ import billsRoutes from './src/routes/bills.js';
 import helpersRoutes from './src/routes/helpers.js';
 import botRoutes from './src/routes/botRoutes.js';
 import devRoutes from './src/routes/dev.js';
+import orderRoutes from './src/routes/orderRoutes.route.js';
 // import googleRoutes from './src/routes/google.js';
 import morgan from 'morgan';
 import Bill from './src/models/Bill.js';
@@ -194,12 +195,13 @@ app.get('/', async (req, res) => {
 });
 
 app.use('/api/banner', bannerRoutes);
+app.use('/api/orders', orderRoutes);
 
 
 
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(5000, () => {
   console.log(`Server is running on port ${PORT}`);
 });
