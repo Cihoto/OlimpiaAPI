@@ -7,7 +7,7 @@ router.get('/createOrderEmailBody', async (req, res) => {
     try {
         const { customData } = req.body;
 
-        const { email, qtyPink, qtyDulce, qtyAmargo, shippingAddress, rut } = customData;
+        const { qtyPink, qtyDulce, qtyAmargo, shippingAddress, rut } = customData;
 
         //validate required fields each one
         if (!qtyPink || !qtyDulce || !qtyAmargo || !shippingAddress || !rut) {
