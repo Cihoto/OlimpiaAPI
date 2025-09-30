@@ -3,7 +3,7 @@ import { Router } from "express";
 const router = Router();
 
 // Define your order-related routes here
-router.get('/createOrderEmailBody', async (req, res) => {
+router.post('/createOrderEmailBody', async (req, res) => {
     try {
         console.log("req.body", req.body);
         const { customData } = req.body;
