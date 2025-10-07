@@ -7,12 +7,14 @@ router.post('/createOrderEmailBody', async (req, res) => {
     try {
         console.log("req.body", req.body);
         const { customData } = req.body;
-
         const { qtyPink, qtyDulce, qtyAmargo, shippingAddress, rut } = customData;
 
         //validate required fields each one
-        if (!qtyPink || !qtyDulce || !qtyAmargo || !shippingAddress || !rut) {
-            return res.status(400).json({ message: 'Missing required fields' });
+        if (!shippingAddress || !rut) {
+            const missingFields = [];
+            if (!shippingAddress) missingFields.push('shippingAddress');
+            if (!rut) missingFields.push('rut');
+            return res.status(400).json({ message: 'Missing required fields', missingFields });
         }
 
         function formatChileanRut(rawRut) {
