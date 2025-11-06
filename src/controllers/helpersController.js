@@ -191,8 +191,8 @@ async function readEmailBody(req, res) {
             Comuna comuna de despacho. Si no la encuentras, devuelve null
             Rut ver reglas anteriores
             Pedido_Cantidad_Pink cantidad de cajas de chocolate pink. Si no existe, devuelve 0
-            Pedido_Cantidad_Amargo: devuelve 0
-            Pedido_Cantidad_Leche: devuelve 0
+            Pedido_Cantidad_Amargo: cantidad de cajas de chocolate amargo. Si no existe, devuelve 0
+            Pedido_Cantidad_Leche: cantidad de cajas de chocolate de leche. Si no existe, devuelve 0
             Pedido_PrecioTotal_Pink: devuelve 0
             Pedido_PrecioTotal_Amargo monto total del pedido de chocolate amargo. Si no existe, devuelve 0
             Pedido_PrecioTotal_Leche monto total del pedido de chocolate de leche. Si no existe, devuelve 0
@@ -231,6 +231,7 @@ async function readEmailBody(req, res) {
             pedido con retiro
             En caso de duda devolver true por defecto
         `
+        console.log("userPrompt",userPrompt);
 
         const response = await client.chat.completions.create({
             model: 'gpt-4o',
@@ -453,6 +454,9 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailD
                     console.log("1")
 
                     if (results.length == 1) {
+                        console.log("results[0]", results[0]['Comuna Despacho'],emailDate);
+
+
                         const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho'],emailDate);
                         if (deliveryDay != null) {
                             results[0]['deliveryDay'] = `${deliveryDay}`;
@@ -536,6 +540,8 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery,emailD
                         return;
                     }
 
+                    console.log("Se encontro una coincidencia");
+                    console.log("found", found['Comuna Despacho'], emailDate);
                     const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho'],emailDate);
 
                     if (deliveryDay != null) {

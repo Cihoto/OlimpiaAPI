@@ -33,24 +33,28 @@ router.post('/createOrderEmailBody', async (req, res) => {
 
         const formattedRut = formatChileanRut(rut);
 
-        const emailBody = `Hola, he realizado un nuevo pedido con los siguientes detalles:
-        - RUT: ${formattedRut}
-        - Dirección de envío: ${shippingAddress}
-        - Cantidad de Franui Pink: ${qtyPink}
-        - Cantidad de Franui Dulce: ${qtyDulce}
-        - Cantidad de Franui Amargo: ${qtyAmargo}`
+        const emailBody = `Hola, quiero realizar un nuevo pedido:\n` +
+        `- RUT: ${formattedRut}\n` +
+        `- Dirección de despacho: ${shippingAddress}\n`;
+        
+        let quantities = '';
+        if(qtyPink && qtyPink > 0) quantities += `- Cantidad cajas Franui Pink: ${qtyPink}\n`;
+        if(qtyDulce && qtyDulce > 0) quantities += `- Cantidad cajas Franui Dulce: ${qtyDulce}\n`;
+        if(qtyAmargo && qtyAmargo > 0) quantities += `- Cantidad cajas Franui Amargo: ${qtyAmargo}\n`;
+
+        const finalEmailBody = emailBody + quantities;
 
         const responseExternalWebhook = await fetch('https://services.leadconnectorhq.com/hooks/Gl52wPdpBISW5fdS3x7A/webhook-trigger/3287054f-0086-4575-9c2d-6e4bead77831', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body:   JSON.stringify({ emailBody, rut: formattedRut })
+            body:   JSON.stringify({ emailBody: finalEmailBody, rut: formattedRut })
         });
-        const responseExternalWebhookData = await responseExternalWebhook.json();
-        console.log("responseExternalWebhookData", responseExternalWebhookData);
-        res.json({ emailBody });
-        
+        // const responseExternalWebhookData = await responseExternalWebhook.json();
+        // console.log("responseExternalWebhookData", responseExternalWebhookData);
+        res.json({ finalEmailBody });
+
     } catch (error) {
         console.error('Error generating order email body:', error);
         res.status(500).json({ message: 'Internal server error' });

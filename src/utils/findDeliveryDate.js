@@ -237,7 +237,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 break;
             }
 
-            // if (deliveryDayIndex > emailDateDayIndex) {
+            if (deliveryDayIndex > emailDateDayIndex) {
 
                 
                 deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
@@ -256,13 +256,13 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
                 if (emailDateHour >= 12) {
                     console.log("PASADA LA HORA DE CORTE", emailDateHour)
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 2)
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
                 } else {
                     console.log("ANTES DE LA HORA DE CORTE", emailDateHour)
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
+                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
                 }
                 break;
-            // }
+            }
         }
 
         // Get the day name using the deliveryIndex

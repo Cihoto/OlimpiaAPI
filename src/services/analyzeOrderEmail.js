@@ -47,9 +47,10 @@ async function analyzeOrderEmail(emailContent) {
         const assistantResponse = messages.data.find(m => m.role === 'assistant');
         console.log('assistantResponse', assistantResponse);
         const reply = parseToJson(assistantResponse?.content?.[0]?.text?.value || 'Sin respuesta');;
-
+        console.log("reply", reply);
         return reply;
     } catch (error) {
+        console.error("Error analyzing order email:", error);
         return {
             Pedido_Cantidad_Pink : 0,
             Pedido_Cantidad_Amargo: 0,
