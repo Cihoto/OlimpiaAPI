@@ -209,6 +209,10 @@ class Bill {
 
     #checkpaymentCondition() {
         try {
+
+            if( this.paymentCondition === "NOTA DE VENTA (CONTADO)" || this.paymentCondition === "NOTA DE VENTA"){
+                this.paymentCondition = "CONTADO";
+            }
             const paymentCodes = [
 
                 { code: "3DIAS", name: ["3DIAS", "3"], paymentDays: 3 },
@@ -224,7 +228,7 @@ class Bill {
                 { code: "CREDITO306090", name: ["CREDITO306090", "3690"], paymentDays: 30 },
                 { code: "CHEQUE", name: ["CHEQUE", "C1"], paymentDays: 1 },
                 { code: "CHEQUE15DIAS", name: ["CHEQUE15DIAS", "C15"], paymentDays: 15 },
-                { code: "CHEQUE30IAS", name: ["CHEQUE30IAS", "C30"], paymentDays: 30 },
+                { code: "CHEQUE30DIAS", name: ["CHEQUE30DIAS", "C30"], paymentDays: 30 },
                 { code: "CREDITO5", name: ["CREDITO5", "5"], paymentDays: 5 },
                 { code: "CREDITO60", name: ["CREDITO60", "60"], paymentDays: 60 },
                 { code: "CREDITO90", name: ["CREDITO90", "90"], paymentDays: 90 }

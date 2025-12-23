@@ -52,9 +52,13 @@ async function analyzeOrderEmail(emailContent) {
     } catch (error) {
         console.error("Error analyzing order email:", error);
         return {
-            Pedido_Cantidad_Pink : 0,
+            Pedido_Cantidad_Pink: 0,
             Pedido_Cantidad_Amargo: 0,
-            Pedido_Cantidad_Leche: 0
+            Pedido_Cantidad_Leche: 0,
+            Pedido_Cantidad_Free: 0,
+            Pedido_Cantidad_Pink_90g: 0,
+            Pedido_Cantidad_Amargo_90g: 0,
+            Pedido_Cantidad_Leche_90g: 0
         }
     }
 }

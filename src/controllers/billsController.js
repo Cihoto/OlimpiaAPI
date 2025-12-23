@@ -80,8 +80,78 @@ async function createBill(req, res) {
         const BILLJSON = await bill.toJSON();
         const filePath = path.resolve('./src/controllers/bills.json');
 
-        // res.json(BILLJSON);
-        // return
+        console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+        console.log("+++++++++++++++++++++++JSON DE DOUCMENTO PARA DEFONTANA+++++++++++++++++++++++");
+        console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+        console.log("BILLJSON", BILLJSON);
+        
+
+        //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
+        let prodQtyToAdd = 0;
+        BILLJSON.details.forEach(item => {
+            console.log("item.count", item);
+            prodQtyToAdd += item.count;
+        });
+        
+        console.log("prodQtyToAdd", prodQtyToAdd);
+        console.log("prodQtyToAdd", prodQtyToAdd);
+        console.log("prodQtyToAdd", prodQtyToAdd);
+        console.log("prodQtyToAdd", prodQtyToAdd);
+
+        if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
+            console.log("Agregando costo de despacho segun region:", body.region);
+            if (body.region === "RM") {
+                BILLJSON.details.push({
+                    "type": "A",
+                    "isExempt": false,
+                    "code": "70724043633538",
+                    "count": 1,
+                    "productName": "DESPACHO RM",
+                    "productNameBarCode": "",
+                    "price": 5000,
+                    "discount": {
+                        "type": 0,
+                        "value": 0
+                    },
+                    "unit": "UN",
+                    "analysis": {
+                        "accountNumber": "3110101001",
+                        "businessCenter": "EMPNEGVTAVTA000",
+                        "classifier01": "",
+                        "classifier02": ""
+                    },
+                    "useBatch": false,
+                    "batchInfo": []
+                });
+            }
+            
+            if (bill.region === "V" || bill.region === "VI") {
+                BILLJSON.details.push({
+                    "type": "A",
+                    "isExempt": false,
+                    "code": "70724043633553",
+                    "count": 1,
+                    "productName": "DESPACHO V y VI",
+                    "productNameBarCode": "",
+                    "price": 10000,
+                    "discount": {
+                        "type": 0,
+                        "value": 0
+                    },
+                    "unit": "UN",
+                    "analysis": {
+                        "accountNumber": "3110101001",
+                        "businessCenter": "EMPNEGVTAVTA000",
+                        "classifier01": "",
+                        "classifier02": ""
+                    },
+                    "useBatch": false,
+                    "batchInfo": []
+                });
+            }
+        }
+        res.json(BILLJSON);
+        return
 
 
 
@@ -104,25 +174,25 @@ async function createBill(req, res) {
         // });
         // return
 
-        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-        console.log("saveSaleURL", saveSaleURL);
-        const createBillDefontana = await fetch(saveSaleURL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${req.apiKey}`
-            },
-            body: JSON.stringify(BILLJSON)
-        })
+        // const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
+        // console.log("saveSaleURL", saveSaleURL);
+        // const createBillDefontana = await fetch(saveSaleURL, {
+        //     method: 'POST',
+        //     headers: {
+        //         'Content-Type': 'application/json',
+        //         Authorization: `Bearer ${req.apiKey}`
+        //     },
+        //     body: JSON.stringify(BILLJSON)
+        // })
 
-        const createBillDefontanaResponse = await createBillDefontana.json();
-        console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+        // const createBillDefontanaResponse = await createBillDefontana.json();
+        // console.log("createBillDefontanaResponse", createBillDefontanaResponse);
 
-        res.status(200).json({
-            createBillDefontanaResponse,
-            success: true,
-            data: BILLJSON
-        });
+        // res.status(200).json({
+        //     createBillDefontanaResponse,
+        //     success: true,
+        //     data: BILLJSON
+        // });
 
         return;
 

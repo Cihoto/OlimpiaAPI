@@ -98,9 +98,9 @@ app.get('/', async (req, res) => {
   const communityResponse = findDeliveryDayByComuna("Providencia", "2025-11-05T08:55:59.000Z");
   // 26-05-2025 09:57:50
   // const communityResponse = findDeliveryDayByComuna("EL BOSQUE", "2025-06-28T08:57:50Z");
-  console.log("communityResponse", communityResponse);
-  res.json(communityResponse);
-  return;
+  // console.log("communityResponse", communityResponse);
+  // res.json(communityResponse);
+  // return;
   // return
 
   // if(!req.apiKey) {
@@ -108,7 +108,7 @@ app.get('/', async (req, res) => {
   // }
 
   // const allCoins = await getAllCoinsId(req.apiKey)
-  // const allPayments = await getAllPaymentsConditions(req.apiKey)
+  const allPayments = await getAllPaymentsConditions(req.apiKey)
   // const shops = await getShops(req.apiKey)
   // const priceList = await getPriceList(req.apiKey)
   // const getPriceListDetail = await getPriceListDetails(req.apiKey)
@@ -120,8 +120,8 @@ app.get('/', async (req, res) => {
   // const getStoragess = await getStorages(req.apiKey)
   // const businessAnalysiss = await businessAnalysis(req.apiKey);// api/Sale/GetDocumentAnalisys
   // const codess = allPayments.items.map((desc) => desc.code);
-  // res.json({ getClientFromId });
-  // return
+  res.json({ allPayments });
+  return
 
 
   // const businessCentersURL = `${process.env.ACCOUNTING_API_URL_DEV}GetBusinessCenterPlan`

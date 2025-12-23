@@ -33,7 +33,9 @@ const uniqueCommunities = [
     "LA REINA",
     "LA CISTERNA",
     "CERRILLOS",
-    "MACUL"
+    "MACUL",
+    "CONCHALÍ",
+    "PUDAHUEL"
 ]
 
 const deliveryDays = [
@@ -52,7 +54,8 @@ const deliveryDays = [
             "COLINA",
             "HUECHURABA",
             "INDEPENDENCIA",
-            "QUILICURA"
+            "QUILICURA",
+            "PUDAHUEL"
         ]
     },
     {
@@ -89,7 +92,8 @@ const deliveryDays = [
             "ESTACIÓN CENTRAL",
             "RECOLETA",
             "COLINA",
-            "HUECHURABA"
+            "HUECHURABA",
+            "PUDAHUEL"
         ]
     },
     {
@@ -130,6 +134,7 @@ const deliveryDays = [
             "INDEPENDENCIA",
             "QUILICURA",
             "CONCHALÍ",
+            "PUDAHUEL"
         ]
     }
 ];

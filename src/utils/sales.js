@@ -15,7 +15,7 @@ const getAllCoinsId = async (apiKey) => {
 
 const getAllPaymentsConditions = async (apiKey) => {
 
-    const paymentsConditionsURL = `https://replapi.defontana.com/api/Sale/GetPaymentConditions`
+    const paymentsConditionsURL = `https://api.defontana.com/api/Sale/GetPaymentConditions`
     const options = {
         method: 'GET',
         headers : { 
