@@ -7,6 +7,61 @@ import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 import { analyzeOrderEmail } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 const client = new OpenAI();
 
+// Normalize CSV record keys/values to expected canonical keys
+function normalizeClientRecord(raw) {
+    const item = {};
+
+    const normalizeKey = (k) => k.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
+    const mapKey = (k) => {
+        if (k.includes('direccion') && k.includes('despacho')) return 'Dirección Despacho';
+        if (k.includes('direccion') && k.includes('facturacion')) return 'Dirección Facturación';
+        if (k.includes('comuna')) return 'Comuna Despacho';
+        if (k.includes('region') || (k.includes('region') && k.includes('despacho')) || (k.includes('reg') && k.includes('despacho'))) return 'Región Despacho';
+        if (k.includes('precio') && k.includes('caja 90')) return 'Precio Caja 90';
+        if (k.includes('precio') && k.includes('90')) return 'Precio Caja 90';
+        if (k.includes('precio') && k.includes('free')) return 'Precio Caja Free';
+        if (k.includes('precio') && k.includes('caja')) return 'Precio Caja';
+        if (k.includes('razon') || k.includes('razon social') || k.includes('razon_social') || k.includes('razon social')) return 'RAZÓN SOCIAL';
+        if (k === 'name' || k.includes('company name')) return 'NAME';
+        if (k.includes('rut')) return 'RUT';
+        if (k.includes('email factura')) return 'EMAIL FACTURA';
+        if (k.includes('email pedido')) return 'EMAIL PEDIDO';
+        if (k.includes('diascredito') || k.includes('dias credito') || k.includes('dias credito')) return 'diasCredito';
+        if (k.includes('orden') && k.includes('compra')) return 'Orden de compra (SI O NO)';
+        if (k.includes('centro')) return 'CENTRO DE NEGOCIOS ';
+        if (k.includes('vendedor')) return 'VENDEDOR ';
+        return k; // fallback: keep original
+    };
+
+    Object.keys(raw).forEach((origKey) => {
+        const nk = normalizeKey(origKey);
+        const mapped = mapKey(nk);
+        let val = raw[origKey];
+        if (typeof val === 'string') {
+            val = val.trim();
+        }
+
+        // Normalize price fields to numbers but keep original keys expected elsewhere
+        if (mapped === 'Precio Caja' || mapped === 'Precio Caja 90' || mapped === 'Precio Caja Free') {
+            if (typeof val === 'string' && val !== '') {
+                const num = Number(val.replace(/[^0-9-]/g, ''));
+                item[mapped] = isNaN(num) ? 0 : num;
+            } else if (typeof val === 'number') {
+                item[mapped] = val;
+            } else {
+                item[mapped] = 0;
+            }
+            return;
+        }
+
+        // Keep other fields as trimmed strings
+        item[mapped] = val;
+    });
+
+    return item;
+}
+
 const CSV = './src/documents/KNOWLEDGEBASE.csv'; // Use the file path as a string
 
 async function readCSV(req, res) {
@@ -29,12 +84,10 @@ async function readCSV(req, res) {
 
                 console.log("***********************************************")
 
-                results.forEach((item) => {
-                    // Normalize prices to numbers
-                    item['Precio Caja'] = item['Precio Caja'].replaceAll('.', '');
-                    item['Precio Caja'] = Number(item['Precio Caja']);
-                    // item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
-                })
+                // Normalize all records' keys and values
+                for (let i = 0; i < results.length; i++) {
+                    results[i] = normalizeClientRecord(results[i]);
+                }
 
                 if (results.length == 0) {
                     res.status(200).json({
@@ -268,7 +321,8 @@ Debes extraer los siguientes datos:
 
 === DATOS DEL CLIENTE ===
 Razon_social: contiene la razón social del cliente
-Direccion_despacho: dirección a la cual se enviarán los productos. Si no la encuentras, devuelve null
+Direccion_despacho: dirección PRINCIPAL de despacho. Priorizar la que diga "despacho", "entrega" o "envío". Si no la encuentras, devuelve null
+Direcciones_encontradas: ARRAY con TODAS las direcciones encontradas en el documento (facturación, despacho, entrega, etc). Esto es MUY IMPORTANTE para poder buscar coincidencias. Ejemplo: ["NUEVA LOS LEONES 030 LOCAL 16", "AVDA COSTANERA SUR 2710 PISO 12"]
 Comuna: comuna de despacho. Si no la encuentras, devuelve null
 Rut: ver reglas anteriores
 
@@ -325,6 +379,16 @@ Puede estar en el cuerpo del correo o en el asunto
 Debe incluir calle y comuna
 Si no se menciona dirección específica puede estar indicada como sucursal o local
 Si el pedido es para retiro reemplaza este valor por la palabra RETIRO
+PRIORIDAD: Si hay múltiples direcciones, priorizar la que esté etiquetada como "despacho", "entrega" o "envío" sobre la de "facturación"
+
+Reglas para Direcciones_encontradas:
+Debe ser un ARRAY con TODAS las direcciones físicas encontradas en el documento
+Incluir tanto direcciones de facturación como de despacho
+No incluir direcciones de correo electrónico
+No incluir direcciones web/URL
+Ejemplo: si el documento dice "Dirección: NUEVA LOS LEONES 030" y "Dirección: AVDA COSTANERA SUR 2710", devolver ["NUEVA LOS LEONES 030", "AVDA COSTANERA SUR 2710"]
+Si solo hay una dirección, devolver array con un elemento
+Si no hay direcciones, devolver array vacío []
 
 Reglas para identificar productos de 90g:
 Buscar menciones de "90g", "90 gramos", "90gr" en el nombre del producto
@@ -360,6 +424,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
 {
     "Razon_social": "valor o null",
     "Direccion_despacho": "valor o null",
+    "Direcciones_encontradas": ["direccion1", "direccion2"],
     "Comuna": "valor o null",
     "Rut": "valor o null",
     "Pedido_Cantidad_Pink": 0,
@@ -402,7 +467,29 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
 
         const jsonResponse = response.choices[0].message.content.trim();
         const sanitizedOutput = jsonResponse.replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
-        const validJson = JSON.parse(sanitizedOutput)[0];
+        console.log("***********************************************SANITIZED OUTPUT *************************************************");
+        console.log({ sanitizedOutput });
+        
+        let parsedOutput;
+        let validJson;
+        try {
+            parsedOutput = JSON.parse(sanitizedOutput);
+
+            if (Array.isArray(parsedOutput)) {
+                if (parsedOutput.length === 0) {
+                    throw new Error('GPT returned an empty array');
+                }
+                console.log('GPT response is an ARRAY. Using first element as primary match.');
+                validJson = parsedOutput[0];
+                // Optionally keep the full array for further processing or logging
+                // const fullMatches = parsedOutput;
+            } else {
+                console.log('GPT response is an OBJECT. Using it as primary match.');
+                validJson = parsedOutput;
+            }
+        } catch (e) {
+            throw new Error('Invalid JSON returned from GPT: ' + e.message);
+        }
 
         console.log("***********************************************VALID JSON *************************************************");
         console.log({ validJson });
@@ -458,16 +545,98 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             });
         }
 
-        const clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery, emailDate); // Call the readCSV function with the RUT and address
+        // Construir lista de direcciones a probar (primero la principal, luego las alternativas)
+        const direccionesAProbar = [];
+        
+        // Agregar dirección principal si existe
+        if (validJson.Direccion_despacho && validJson.Direccion_despacho !== 'null' && validJson.Direccion_despacho !== null) {
+            direccionesAProbar.push(validJson.Direccion_despacho);
+        }
+        
+        // Agregar direcciones encontradas que no sean la principal
+        if (Array.isArray(validJson.Direcciones_encontradas)) {
+            validJson.Direcciones_encontradas.forEach(dir => {
+                if (dir && dir !== validJson.Direccion_despacho && !direccionesAProbar.includes(dir)) {
+                    direccionesAProbar.push(dir);
+                }
+            });
+        }
+        
+        console.log("****************************************DIRECCIONES A PROBAR*************************************************");
+        console.log("direccionesAProbar", direccionesAProbar);
+        
+        // Intentar con cada dirección hasta encontrar una coincidencia válida
+        let clientData = null;
+        let direccionUsada = null;
+        
+        for (const direccion of direccionesAProbar) {
+            console.log(`Probando dirección: ${direccion}`);
+            const resultado = await readCSV_private(validJson.Rut, direccion, validJson.precio_caja, validJson.isDelivery, emailDate);
+            
+            // Verificar si encontramos datos válidos (no array vacío y tiene Región Despacho)
+            const regionDespachoTemp = resultado?.data?.['Región Despacho'];
+            const esValido = resultado.data && 
+                             !Array.isArray(resultado.data) && 
+                             typeof regionDespachoTemp === 'string' && 
+                             regionDespachoTemp.trim() !== '';
+            
+            if (esValido) {
+                clientData = resultado;
+                direccionUsada = direccion;
+                console.log(`✓ Coincidencia encontrada con dirección: ${direccion}`);
+                break;
+            } else {
+                console.log(`✗ Sin coincidencia para dirección: ${direccion}`);
+            }
+        }
+        
+        // Si no encontramos nada con ninguna dirección, usar el resultado del último intento o hacer uno con la principal
+        if (!clientData) {
+            clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery, emailDate);
+        }
+        
         console.log("clientData", clientData);
-        console.log("clientData Región Despacho", clientData['Región Despacho']);
+        console.log("clientData Región Despacho", clientData.data?.['Región Despacho']);
+        console.log("Dirección usada para match:", direccionUsada);
         console.log("{}{}{}{}{}{}{}{}{}{}{}{}{}{}}{{}}{{}}{}{}{}{}{}{}{}{}{");
-        if (clientData.data['Región Despacho'].toLowerCase().trim() == "santiago") {
+        
+        // Verificar si clientData.data existe, no es array, y tiene 'Región Despacho' como string válido
+        const regionDespacho = clientData?.data?.['Región Despacho'];
+        const isValidClientData = clientData.data && 
+                                   !Array.isArray(clientData.data) && 
+                                   typeof regionDespacho === 'string' && 
+                                   regionDespacho.trim() !== '';
+        
+        if (!isValidClientData) {
+            // Si no hay datos del cliente válidos, retornar error con info de direcciones probadas
+            return res.status(400).json({
+                success: false,
+                error: 'No se encontró coincidencia de dirección en la base de clientes',
+                direccionesProbadas: direccionesAProbar,
+                cantidadDireccionesProbadas: direccionesAProbar.length,
+                data: validJson,
+                clientData: clientData,
+                requestBody: req.body,
+                executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
+                OC_date: moment().format('DD-MM-YYYY')
+            });
+        }
+        
+        // Si usamos una dirección alternativa, actualizar validJson para reflejar la correcta
+        if (direccionUsada && direccionUsada !== validJson.Direccion_despacho) {
+            console.log(`Actualizando Direccion_despacho de "${validJson.Direccion_despacho}" a "${direccionUsada}"`);
+            validJson.Direccion_despacho_original = validJson.Direccion_despacho;
+            validJson.Direccion_despacho = direccionUsada;
+        }
+        
+        // Ahora es seguro usar toLowerCase() porque ya validamos que es string no vacío
+        const regionNormalized = regionDespacho.toLowerCase().trim();
+        
+        if (regionNormalized === "santiago") {
             clientData.data['region'] = "RM";
-        } else if (clientData.data['Región Despacho'].toLowerCase().trim() == "ohiggins") {
+        } else if (regionNormalized === "ohiggins" || regionNormalized === "o'higgins") {
             clientData.data['region'] = "VI";
-        } else if (clientData.data['Región Despacho'].toLowerCase().trim() == "valparaíso"
-            || clientData.data['Región Despacho'].toLowerCase().trim() == "valparaiso") {
+        } else if (regionNormalized === "valparaíso" || regionNormalized === "valparaiso") {
             clientData.data['region'] = "V";
         } else {
             clientData.data['region'] = "";
@@ -621,27 +790,10 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
                     console.log("***********************************************")
                     console.log("results", results);
 
-                    results.forEach((item) => {
-                        // Normalize prices to numbers
-
-
-                        item['Precio Caja'] = item['Precio Caja'].replaceAll(',', '');
-                        item['Precio Caja'] = item['Precio Caja'].replaceAll('.', '');
-                        item['Precio Caja'] = item['Precio Caja'].replaceAll('$', '');
-                        item['Precio Caja'] = Number(item['Precio Caja']);
-
-                        item['Precio Caja 90'] = item['Precio Caja 90'].trim()
-                            .replaceAll(',', '')
-                            .replaceAll('.', '')
-                            .replaceAll('$', '');
-                        item['Precio Caja 90'] = Number(item['Precio Caja 90']);
-
-                        item['Precio Caja Free'] = item['Precio Caja Free'].trim()
-                            .replaceAll(',', '')
-                            .replaceAll('.', '')
-                            .replaceAll('$', '');
-                        item['Precio Caja Free'] = Number(item['Precio Caja Free']);
-                    });
+                    // Normalize all records' keys and values using helper
+                    for (let i = 0; i < results.length; i++) {
+                        results[i] = normalizeClientRecord(results[i]);
+                    }
 
                     // return results;
 
