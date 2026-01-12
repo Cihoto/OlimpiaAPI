@@ -84,7 +84,7 @@ async function createBill(req, res) {
         console.log("+++++++++++++++++++++++JSON DE DOUCMENTO PARA DEFONTANA+++++++++++++++++++++++");
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("BILLJSON", BILLJSON);
-        
+
 
         //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
         let prodQtyToAdd = 0;
@@ -92,10 +92,7 @@ async function createBill(req, res) {
             console.log("item.count", item);
             prodQtyToAdd += item.count;
         });
-        
-        console.log("prodQtyToAdd", prodQtyToAdd);
-        console.log("prodQtyToAdd", prodQtyToAdd);
-        console.log("prodQtyToAdd", prodQtyToAdd);
+
         console.log("prodQtyToAdd", prodQtyToAdd);
 
         if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
@@ -124,7 +121,7 @@ async function createBill(req, res) {
                     "batchInfo": []
                 });
             }
-            
+
             if (bill.region === "V" || bill.region === "VI") {
                 BILLJSON.details.push({
                     "type": "A",
@@ -150,7 +147,6 @@ async function createBill(req, res) {
                 });
             }
         }
-
 
         let existingBills = [];
         if (fs.existsSync(filePath)) {
