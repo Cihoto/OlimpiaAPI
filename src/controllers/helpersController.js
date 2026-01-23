@@ -1,11 +1,25 @@
 import fs from 'fs';
+import path from 'path';
 import csvParser from 'csv-parser';
 import OpenAI from 'openai';
 import moment from 'moment';
+import XLSX from 'xlsx';
+import pdfParse from 'pdf-parse';
 import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
-import { analyzeOrderEmail } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
+import { analyzeOrderEmail, analyzeOrderEmailFromGmail } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
+import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
+import {
+    buildGmailClient,
+    decodeBase64Url,
+    extractEmailAddress,
+    extractEmailText,
+    findExcelAttachments,
+    findPdfAttachments,
+    headersToMap
+} from '../utils/Google/gmail.js';
 const client = new OpenAI();
+const KEY_LOGISTICS_BLOCKED_RUTS = new Set(['77.419.327-8', '96.930.440-6']);
 
 // Normalize CSV record keys/values to expected canonical keys
 function normalizeClientRecord(raw) {
@@ -181,7 +195,14 @@ async function readEmailBody(req, res) {
             .replaceAll(/\s+/g, ' ') // Remove all white spaces
             .trim(); // Trim leading and trailing spaces
 
-        const { emailBody, emailSubject, emailAttached, emailDate } = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
+        const {
+            emailBody,
+            emailSubject,
+            emailAttached,
+            emailDate,
+            source,
+            keyLogistics
+        } = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
         console.log(JSON.parse(sanitizedEmailBody));
 
@@ -458,7 +479,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         console.log("userPrompt", userPrompt);
 
         const response = await client.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt },
@@ -494,6 +515,17 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         console.log("***********************************************VALID JSON *************************************************");
         console.log({ validJson });
 
+        const keyLogisticsData = keyLogistics && typeof keyLogistics === 'object' ? keyLogistics : null;
+        if (keyLogisticsData?.rut) {
+            validJson.Rut = keyLogisticsData.rut;
+        }
+        if (keyLogisticsData) {
+            const normalizedRut = validJson.Rut ? normalizeRut(validJson.Rut) : '';
+            if (normalizedRut && KEY_LOGISTICS_BLOCKED_RUTS.has(normalizedRut)) {
+                validJson.Rut = null;
+            }
+        }
+
         let rutIsFound = false
         if (!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
             const foundSpecialCustomer = foundSpecialCustomers(validJson.Razon_social);
@@ -505,7 +537,11 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             rutIsFound = true
         }
 
-        const analyzeOrderEmaiResponse = await analyzeOrderEmail(sanitizedEmailBody);
+        const analyzeOrderEmaiResponse = keyLogisticsData?.quantities
+            ? { ...EMPTY_ORDER_QUANTITIES, ...keyLogisticsData.quantities }
+            : (source === 'gmail'
+                ? await analyzeOrderEmailFromGmail(sanitizedEmailBody)
+                : await analyzeOrderEmail(sanitizedEmailBody));
         console.log("analyzeOrderEmaiResponse", analyzeOrderEmaiResponse);
         // Productos 150g (24 unidades por caja)
         validJson.Pedido_Cantidad_Pink = analyzeOrderEmaiResponse.Pedido_Cantidad_Pink || 0;
@@ -608,6 +644,20 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                                    regionDespacho.trim() !== '';
         
         if (!isValidClientData) {
+            let formattedEmailDate = "";
+            if (moment(emailDate, moment.ISO_8601, true).isValid()) {
+                formattedEmailDate = moment(emailDate).tz('America/Santiago').format('DD-MM-YYYY HH:mm:ss');
+            }
+
+            const mergedNoMatch = {
+                "EmailData": { ...validJson },
+                "ClientData": { ...clientData },
+                "executionDate": moment().format('DD-MM-YYYY HH:mm:ss'),
+                "OC_date": moment().format('DD-MM-YYYY'),
+                "emailDate": moment(emailDate, moment.ISO_8601, true).isValid() ? formattedEmailDate : emailDate,
+                "hasMatch": false
+            };
+
             // Si no hay datos del cliente válidos, retornar error con info de direcciones probadas
             return res.status(400).json({
                 success: false,
@@ -616,6 +666,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                 cantidadDireccionesProbadas: direccionesAProbar.length,
                 data: validJson,
                 clientData: clientData,
+                merged: mergedNoMatch,
                 requestBody: req.body,
                 executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
                 OC_date: moment().format('DD-MM-YYYY')
@@ -654,6 +705,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             "executionDate": moment().format('DD-MM-YYYY HH:mm:ss'),
             "OC_date": moment().format('DD-MM-YYYY'),
             "emailDate": moment(emailDate, moment.ISO_8601, true).isValid() ? formattedEmailDate : emailDate,
+            "hasMatch": true,
 
         };
 
@@ -702,6 +754,240 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             data: response,
             executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
             OC_date: moment().format('DD-MM-YYYY')
+        });
+    }
+}
+
+function sanitizeFilename(name) {
+    const base = path.basename(name || 'attachment');
+    return base.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+async function saveTempFiles(messageId, filename, buffer, text) {
+    const tempDir = path.resolve(process.cwd(), 'temp');
+    await fs.promises.mkdir(tempDir, { recursive: true });
+
+    const safeName = sanitizeFilename(filename);
+    const baseName = `${messageId}_${safeName}`;
+    const attachmentPath = path.join(tempDir, baseName);
+    const textPath = path.join(tempDir, `${baseName}.txt`);
+
+    await fs.promises.writeFile(attachmentPath, buffer);
+    await fs.promises.writeFile(textPath, text, 'utf8');
+
+    return { attachmentPath, textPath };
+}
+
+function excelBufferToText(buffer) {
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const maxRows = Number.parseInt(process.env.GMAIL_EXCEL_MAX_ROWS || '200', 10);
+    const maxCols = Number.parseInt(process.env.GMAIL_EXCEL_MAX_COLS || '30', 10);
+
+    const sections = workbook.SheetNames.map((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            defval: '',
+            blankrows: false
+        });
+
+        const trimmedRows = rows
+            .map((row) => row.slice(0, maxCols).map((cell) => String(cell).replace(/\s+/g, ' ').trim()))
+            .filter((row) => row.some((cell) => cell !== ''))
+            .slice(0, maxRows);
+
+        const content = trimmedRows.map((row) => row.join('\t')).join('\n');
+        return `Sheet: ${sheetName}\n${content}`;
+    });
+
+    return sections.join('\n\n');
+}
+
+async function pdfBufferToText(buffer) {
+    const data = await pdfParse(buffer);
+    return data.text || '';
+}
+
+async function runReadEmailBodyPayload(payload) {
+    const requestBody = JSON.stringify(payload);
+
+    return new Promise((resolve, reject) => {
+        const fakeReq = { body: requestBody };
+        const fakeRes = {
+            statusCode: 200,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            json(body) {
+                resolve({ status: this.statusCode, body });
+            }
+        };
+
+        readEmailBody(fakeReq, fakeRes).catch(reject);
+    });
+}
+
+async function readEmailBodyFromGmail(req, res) {
+    const requestBody = req.body || {};
+    const messageId = typeof requestBody === 'string' ? requestBody.trim() : requestBody.messageId;
+    if (!messageId) {
+        return res.status(400).json({ success: false, error: 'messageId es requerido' });
+    }
+
+    try {
+        const { gmail, userId } = await buildGmailClient();
+        const message = await gmail.users.messages.get({
+            userId,
+            id: messageId,
+            format: 'full'
+        });
+
+        const headers = headersToMap(message.data?.payload?.headers || []);
+        const sender = extractEmailAddress(headers.From || '').toLowerCase();
+        const keyLogisticsSender = 'fax@keylogistics.cl';
+        const allowedSenders = new Set([
+            'compras.marketds@pedidosya.com',
+            keyLogisticsSender
+        ]);
+
+        if (!allowedSenders.has(sender)) {
+            return res.status(403).json({
+                success: false,
+                error: 'Emisor no permitido',
+                sender,
+                allowedSenders: Array.from(allowedSenders)
+            });
+        }
+
+        const emailBody = extractEmailText(message.data?.payload);
+        const emailSubject = headers.Subject || '';
+        const emailDate = message.data?.internalDate
+            ? new Date(Number(message.data.internalDate)).toISOString()
+            : (headers.Date || '');
+
+        if (sender === keyLogisticsSender) {
+            const pdfAttachments = findPdfAttachments(message.data?.payload);
+            if (pdfAttachments.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'No se encontraron adjuntos PDF',
+                    messageId
+                });
+            }
+
+            const results = [];
+            for (const attachment of pdfAttachments) {
+                try {
+                    const attachmentResponse = await gmail.users.messages.attachments.get({
+                        userId,
+                        messageId,
+                        id: attachment.attachmentId
+                    });
+
+                    const buffer = decodeBase64Url(attachmentResponse.data?.data);
+                    const pdfText = await pdfBufferToText(buffer);
+                    const keyLogisticsData = parseKeyLogisticsOrderText(pdfText);
+                    const savedFiles = await saveTempFiles(messageId, attachment.filename, buffer, pdfText);
+                    const payload = {
+                        emailBody,
+                        emailSubject,
+                        emailAttached: pdfText,
+                        emailDate,
+                        source: 'gmail',
+                        keyLogistics: keyLogisticsData
+                    };
+
+                    const response = await runReadEmailBodyPayload(payload);
+                    results.push({
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        savedFiles,
+                        keyLogistics: keyLogisticsData,
+                        status: response.status,
+                        response: response.body
+                    });
+                } catch (error) {
+                    results.push({
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        status: 500,
+                        response: { success: false, error: error.message }
+                    });
+                }
+            }
+
+            return res.status(200).json({
+                messageId,
+                sender,
+                subject: emailSubject,
+                emailDate,
+                attachments: pdfAttachments.length,
+                results
+            });
+        }
+
+        const excelAttachments = findExcelAttachments(message.data?.payload);
+        if (excelAttachments.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No se encontraron adjuntos Excel',
+                messageId
+            });
+        }
+
+        const results = [];
+        for (const attachment of excelAttachments) {
+            try {
+                const attachmentResponse = await gmail.users.messages.attachments.get({
+                    userId,
+                    messageId,
+                    id: attachment.attachmentId
+                });
+
+                const buffer = decodeBase64Url(attachmentResponse.data?.data);
+                const excelText = excelBufferToText(buffer);
+                const savedFiles = await saveTempFiles(messageId, attachment.filename, buffer, excelText);
+                const payload = {
+                    emailBody,
+                    emailSubject,
+                    emailAttached: excelText,
+                    emailDate,
+                    source: 'gmail'
+                };
+
+                const response = await runReadEmailBodyPayload(payload);
+                results.push({
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    savedFiles,
+                    status: response.status,
+                    response: response.body
+                });
+            } catch (error) {
+                results.push({
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    status: 500,
+                    response: { success: false, error: error.message }
+                });
+            }
+        }
+
+        return res.status(200).json({
+            messageId,
+            sender,
+            subject: emailSubject,
+            emailDate,
+            attachments: excelAttachments.length,
+            results
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: 'No se pudo procesar el correo',
+            details: error.message,
+            messageId
         });
     }
 }
@@ -924,4 +1210,4 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
 }
 
 
-export { readCSV, readEmailBody };
+export { readCSV, readEmailBody, readEmailBodyFromGmail };

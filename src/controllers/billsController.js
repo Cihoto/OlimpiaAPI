@@ -85,6 +85,11 @@ async function createBill(req, res) {
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("BILLJSON", BILLJSON);
 
+        return res.json({
+            success: true,
+            data: BILLJSON
+        });
+
 
         //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
         let prodQtyToAdd = 0;
