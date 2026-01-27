@@ -6,6 +6,6 @@ const router = Router();
 // Define routes
 router.get('/readCSV', readCSV);
 router.post('/readEmailBody', readEmailBody);
-router.post('/readEmailBodyFromGmail',  );
+router.post('/readEmailBodyFromGmail', readEmailBodyFromGmail );
 
 export default router;
