@@ -1,165 +1,11 @@
 import { OpenAI } from 'openai';
+import { GENERAL_ORDER_ANALYSIS_PROMPT,GMAIL_ORDER_ANALYSIS_PROMPT} from './prompts/orderExtractor.js';
 
 const SYSTEM_INSTRUCTIONS = ''; // Instrucciones del sistema (puedes personalizarlas después)
 const OLIMPIA_ASSISTANT_ID = process.env.OLIMPIA_ORDER_FINDER_ASSISTENT_ID; // ID del asistente en OpenAI Platform
 const OPENAI_OLIMPIA_API_KEY = process.env.OPENAI_OLIMPIA; // Clave API de OpenAI
 
-const GMAIL_ORDER_ANALYSIS_PROMPT = `Devuelveme exclusivamente un JSON, sin explicaciones ni texto adicional
-No incluyas ningun texto antes o despues del JSON.
-No uses formato Markdown.
-No expliques lo que estas haciendo.
 
-Olimpia SPA maneja dos formatos de productos:
-
-Productos de 150 gramos: vienen en cajas de 24 unidades
-Productos de 90 gramos: vienen en cajas de 18 unidades
-Reglas para interpretar cantidad de cajas:
-Siempre debes entregar la cantidad en cajas, no en unidades.
-Si el pedido menciona caja o cajas, usa directamente ese numero como la cantidad de cajas.
-
-=== REGLAS PARA PRODUCTOS DE 150 GRAMOS (24 unidades por caja) ===
-Aplica a: Amargo, Leche, Pink y Free (cuando NO especifican 90g)
-
-Ejemplos:
-1 caja de chocolate pink equivale a 1,
-24 cajas equivale a 24,
-48 cajas x 24 unidades equivale a 48,
-
-Si el pedido menciona solo unidades (unidades, uds, unidades de) y el numero es multiplo de 24, divide por 24 para obtener la cantidad de cajas.
-Ejemplos:
-48 unidades de chocolate pink equivale a 2,
-24 uds equivale a 1,
-72 unidades equivale a 3,
-
-Si el pedido no menciona que es en cajas, se asume que esta expresado en unidades y hay que dividirlas.
-Si el pedido menciona una cantidad que no es multiplo de 24 y no dice que son cajas, la cantidad es invalida, devuelve 0.
-Ejemplos:
-23 unidades de chocolate equivale a 0,
-25 uds de leche equivale a 0,
-
-Si el texto menciona algo como 24 x 24 unidades o 24 cajas x 24 unidades, interpreta que se trata de 24 cajas, no multipliques por 24.
-
-=== REGLAS PARA PRODUCTOS DE 90 GRAMOS (18 unidades por caja) ===
-Aplica a: Amargo 90g, Leche 90g, Pink 90g (cuando especifican 90g o 90 gramos)
-
-Ejemplos:
-1 caja de Franui Leche 90g equivale a 1,
-18 cajas de Pink 90 gramos equivale a 18,
-
-Si el pedido menciona solo unidades y el numero es multiplo de 18, divide por 18 para obtener la cantidad de cajas.
-Ejemplos:
-36 unidades de Franui Leche 90g equivale a 2,
-18 uds de Pink 90 gramos equivale a 1,
-54 unidades de Amargo 90g equivale a 3,
-
-Si el pedido menciona una cantidad que no es multiplo de 18 y no dice que son cajas, la cantidad es invalida, devuelve 0.
-Ejemplos:
-17 unidades de Leche 90g equivale a 0,
-19 uds de Pink 90 gramos equivale a 0,
-
-=== REGLA POR DEFECTO ===
-Si el pedido NO especifica gramos (90g, 90 gramos), se asume que es el producto de 150 gramos (24 unidades por caja).
-Ejemplos:
-Franui Leche (sin especificar) = Producto de 150g, usar regla de 24 unidades
-Franui Leche 90g = Producto de 90g, usar regla de 18 unidades
-
-Ejemplos adicionales productos 150g:
-48 unidades de chocolate pink equivale a 2 cajas,
-24 cajas de chocolate amargo equivale a 24 cajas,
-96 uds de leche equivale a 4 cajas,
-23 unidades de chocolate pink equivale a 0,
-24 x 24 unidades equivale a 24 cajas,
-2 cajas de chocolate amargo equivale a 2 cajas,
-3 cajas de Franui Free equivale a 3 cajas,
-
-Ejemplos adicionales productos 90g:
-36 unidades de Franui Leche 90g equivale a 2 cajas,
-18 unidades de Pink 90 gramos equivale a 1 caja,
-2 cajas de Amargo 90g equivale a 2 cajas,
-
-Formas de llamar a las cajas:
-cajas, cjas, cjs, cj, display.
-Estos ejemplos pueden estar en mayusculas o minusculas.
-
-=== PRODUCTOS DE 150 GRAMOS (24 unidades por caja) ===
-
-Pedido_Cantidad_Amargo (150g):
-BOMBONES FRANUÃ­ DE FRAMBUESA EN CHOCOLATE AMARGO Y BLANCO 150 G
-CHO NEG-BLAN
-BLANCO-NEGRO
-FRAMB CHO NEG-BLAN S/GLU
-Franui Negro
-FRANUI AMARGO 150G
-Franui Amargo
-Caja Franui Amargo
-
-Pedido_Cantidad_Leche (150g):
-
-FRAMB CHO LECH-BLA S/GLU 1X24U
-BOMBONES FRANUÃ­ DE FRAMBUESA CON CHOCOLATE DE LECHE Y BLANCO 150 G
-CHOC BLAN-LECH
-Frambuesas Banadas De Chocolate De Leche Y Chocolate Blanco
-Franui Dulce
-Franui Leche
-Caja Franui Leche
-
-Pedido_Cantidad_Pink (150g):
-BOMBONES FRANUI PINK FRAMBUESAS CON CHOCOLATE BLANCO 150 G
-FRAMB CHO PINK
-Franui Pink
-Caja Franui Pink
-
-Pedido_Cantidad_Free (150g, 24 unidades, sin azucar):
-BOMBONES FRANUÃ­ FREE SIN GLUTEN 150 G
-Franui Chocolate Free
-Franui Free
-Franui Chocolate Free
-Caja Franui Free
-Chocolate Free
-
-=== PRODUCTOS DE 90 GRAMOS (18 unidades por caja) ===
-
-Pedido_Cantidad_Amargo_90g:
-
-Caja Franui Amargo 90 gramos
-Franui Amargo 90g
-Franui Amargo 90
-Amargo 90g
-FRAMB CHO NEG-BLAN 90G
-
-Pedido_Cantidad_Leche_90g:
-
-Caja Franui Leche 90 gramos
-Franui Leche 90g
-Franui Leche 90
-Leche 90g
-FRAMB CHO LECH 90G
-
-Pedido_Cantidad_Pink_90g:
-
-Caja Franui Pink 90 gramos
-Franui Pink 90g
-Franui Pink 90
-Pink 90g
-FRAMB CHO PINK 90G
-
-Si el nombre del producto esta seguido de una linea con un numero y la palabra CJ (caja), entonces asocia esa cantidad al producto mencionado en la linea anterior.
-
-IMPORTANTE: Si el producto NO especifica "90g" o "90 gramos", se asume que es el producto de 150 gramos.
-
-Los valores deben ser numericos.
-
-Devuelve este JSON:
-
-{
-"Pedido_Cantidad_Pink": 0,
-"Pedido_Cantidad_Amargo": 0,
-"Pedido_Cantidad_Leche": 0,
-"Pedido_Cantidad_Free": 0,
-"Pedido_Cantidad_Pink_90g": 0,
-"Pedido_Cantidad_Amargo_90g": 0,
-"Pedido_Cantidad_Leche_90g": 0
-}`;
 
 const ORDER_QUANTITY_KEYS = [
     'Pedido_Cantidad_Pink',
@@ -389,60 +235,55 @@ function getOpenAIClient() {
     return openaiClient;
 }
 async function analyzeOrderEmail(emailContent) {
-
-
     try {
         const openai = getOpenAIClient();
-        const thread = await openai.beta.threads.create();
-        const threadId = thread.id;
-
-        let activeRun;
-        do {
-            const runs = await openai.beta.threads.runs.list(threadId);
-            activeRun = runs.data.find(run => run.status === 'active');
-
-            if (activeRun) {
-                console.log(`⏳ Esperando a que termine el run activo: ${activeRun.id}`);
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Espera 1 segundo
-            }
-        } while (activeRun);
-
-        // Agrega mensaje del usuario al thread
-        await openai.beta.threads.messages.create(threadId, {
-            role: "user",
-            content: emailContent
+        const response = await openai.responses.create({
+            model: 'gpt-4o-mini',
+            input: [
+                { role: 'system', content: GENERAL_ORDER_ANALYSIS_PROMPT },
+                { role: 'user', content: emailContent }
+            ],
+            text: {
+                format: {
+                    type: 'json_schema',
+                    name: 'order_quantities',
+                    schema: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: [
+                            'Pedido_Cantidad_Pink',
+                            'Pedido_Cantidad_Amargo',
+                            'Pedido_Cantidad_Leche',
+                            'Pedido_Cantidad_Free',
+                            'Pedido_Cantidad_Pink_90g',
+                            'Pedido_Cantidad_Amargo_90g',
+                            'Pedido_Cantidad_Leche_90g'
+                        ],
+                        properties: {
+                            Pedido_Cantidad_Pink: { type: 'number' },
+                            Pedido_Cantidad_Amargo: { type: 'number' },
+                            Pedido_Cantidad_Leche: { type: 'number' },
+                            Pedido_Cantidad_Free: { type: 'number' },
+                            Pedido_Cantidad_Pink_90g: { type: 'number' },
+                            Pedido_Cantidad_Amargo_90g: { type: 'number' },
+                            Pedido_Cantidad_Leche_90g: { type: 'number' }
+                        }
+                    },
+                    strict: true
+                }
+            },
+            temperature: 0
         });
 
-        // Ejecuta el assistant
-        const run = await openai.beta.threads.runs.create(threadId, {
-            assistant_id: OLIMPIA_ASSISTANT_ID
-        });
-
-        // Espera que termine el procesamiento
-        let runStatus;
-        do {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-        } while (runStatus.status !== 'completed');
-
-        // Recupera la última respuesta del bot
-        const messages = await openai.beta.threads.messages.list(threadId);
-        const assistantResponse = messages.data.find(m => m.role === 'assistant');
-        console.log('assistantResponse', assistantResponse);
-        const reply = parseToJson(assistantResponse?.content?.[0]?.text?.value || 'Sin respuesta');;
-        console.log("reply", reply);
-        return reply;
-    } catch (error) {
-        console.error("Error analyzing order email:", error);
-        return {
-            Pedido_Cantidad_Pink: 0,
-            Pedido_Cantidad_Amargo: 0,
-            Pedido_Cantidad_Leche: 0,
-            Pedido_Cantidad_Free: 0,
-            Pedido_Cantidad_Pink_90g: 0,
-            Pedido_Cantidad_Amargo_90g: 0,
-            Pedido_Cantidad_Leche_90g: 0
+        const outputText = response.output_text || '';
+        const parsed = parseOrderQuantitiesJson(outputText);
+        if (!parsed) {
+            return { ...EMPTY_ORDER_QUANTITIES };
         }
+        return parsed;
+    } catch (error) {
+        console.error('Error analyzing order email:', error);
+        return { ...EMPTY_ORDER_QUANTITIES };
     }
 }
 
