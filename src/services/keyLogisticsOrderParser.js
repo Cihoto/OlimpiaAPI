@@ -57,7 +57,8 @@ const KEY_LOGISTICS_CLIENTS = [
         ],
         codeMap: {
             '100912586': { key: 'Pedido_Cantidad_Amargo', boxSize: 24 },
-            '100912587': { key: 'Pedido_Cantidad_Leche', boxSize: 24 }
+            '100912587': { key: 'Pedido_Cantidad_Leche', boxSize: 24 },
+            '100914872': { key: 'Pedido_Cantidad_Pink', boxSize: 24 }
         }
     },
     {
@@ -229,6 +230,7 @@ function parseKeyLogisticsOrderText(text) {
         .filter(Boolean);
 
     const normalizedText = normalizeText(text);
+    const ocNumber = extractOrderNumber(lines);
     const items = [];
 
     for (let i = 0; i < lines.length; i += 1) {
@@ -273,8 +275,28 @@ function parseKeyLogisticsOrderText(text) {
         quantities,
         clientId: client ? client.id : null,
         rut,
+        ocNumber,
         unknownCodes: Array.from(new Set(unknownCodes))
     };
+}
+
+function extractOrderNumber(lines) {
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (/orden de compra/i.test(line)) {
+            const direct = line.match(/\b(\d{6,})\b/);
+            if (direct) {
+                return direct[1];
+            }
+            for (let j = i + 1; j < Math.min(i + 4, lines.length); j += 1) {
+                const candidate = lines[j].match(/\b(\d{6,})\b/);
+                if (candidate) {
+                    return candidate[1];
+                }
+            }
+        }
+    }
+    return null;
 }
 
 export {

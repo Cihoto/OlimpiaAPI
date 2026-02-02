@@ -10,6 +10,10 @@ import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 import { analyzeOrderEmail, analyzeOrderEmailFromGmail } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
 import {
+    findProcessedKeyLogisticsOrder,
+    insertProcessedKeyLogisticsOrder
+} from '../services/mongoOrderRegistry.js';
+import {
     buildGmailClient,
     decodeBase64Url,
     extractEmailAddress,
@@ -877,6 +881,7 @@ async function readEmailBodyFromGmail(req, res) {
             }
 
             const results = [];
+            const seenOrders = new Set();
             for (const attachment of pdfAttachments) {
                 try {
                     const attachmentResponse = await gmail.users.messages.attachments.get({
@@ -889,6 +894,61 @@ async function readEmailBodyFromGmail(req, res) {
                     const pdfText = await pdfBufferToText(buffer);
                     const keyLogisticsData = parseKeyLogisticsOrderText(pdfText);
                     const savedFiles = await saveTempFiles(messageId, attachment.filename, buffer, pdfText);
+
+                    const orderKey = keyLogisticsData?.clientId && keyLogisticsData?.ocNumber
+                        ? `${keyLogisticsData.clientId}:${keyLogisticsData.ocNumber}`
+                        : null;
+
+                    if (orderKey && seenOrders.has(orderKey)) {
+                        results.push({
+                            filename: attachment.filename,
+                            mimeType: attachment.mimeType,
+                            savedFiles,
+                            keyLogistics: keyLogisticsData,
+                            duplicateCheck: null,
+                            status: 409,
+                            response: {
+                                success: false,
+                                error: 'Orden de compra duplicada en el mismo correo',
+                                duplicate: true,
+                                duplicateInMessage: true,
+                                ocNumber: keyLogisticsData.ocNumber,
+                                clientId: keyLogisticsData.clientId
+                            }
+                        });
+                        continue;
+                    }
+
+                    if (orderKey) {
+                        seenOrders.add(orderKey);
+                        try {
+                            const existingOrder = await findProcessedKeyLogisticsOrder({
+                                clientId: keyLogisticsData.clientId,
+                                ocNumber: keyLogisticsData.ocNumber
+                            });
+                            if (existingOrder) {
+                                results.push({
+                                    filename: attachment.filename,
+                                    mimeType: attachment.mimeType,
+                                    savedFiles,
+                                    keyLogistics: keyLogisticsData,
+                                    duplicateCheck: null,
+                                    status: 409,
+                                    response: {
+                                        success: false,
+                                        error: 'Orden de compra duplicada',
+                                        duplicate: true,
+                                        ocNumber: keyLogisticsData.ocNumber,
+                                        clientId: keyLogisticsData.clientId
+                                    }
+                                });
+                                continue;
+                            }
+                        } catch (error) {
+                            // Continue processing; the order won't be marked if validation fails.
+                        }
+                    }
+
                     const payload = {
                         emailBody,
                         emailSubject,
@@ -899,11 +959,33 @@ async function readEmailBodyFromGmail(req, res) {
                     };
 
                     const response = await runReadEmailBodyPayload(payload);
+
+                    if (
+                        orderKey &&
+                        response.status === 200 &&
+                        response.body?.success !== false
+                    ) {
+                        try {
+                            await insertProcessedKeyLogisticsOrder({
+                                clientId: keyLogisticsData.clientId,
+                                ocNumber: keyLogisticsData.ocNumber,
+                                sender,
+                                messageId,
+                                emailDate,
+                                attachmentFilename: attachment.filename,
+                                quantities: keyLogisticsData.quantities
+                            });
+                        } catch (error) {
+                            // Continue without blocking the response; duplicates are handled by unique index.
+                        }
+                    }
+
                     results.push({
                         filename: attachment.filename,
                         mimeType: attachment.mimeType,
                         savedFiles,
                         keyLogistics: keyLogisticsData,
+                        duplicateCheck: null,
                         status: response.status,
                         response: response.body
                     });
@@ -961,6 +1043,7 @@ async function readEmailBodyFromGmail(req, res) {
                     filename: attachment.filename,
                     mimeType: attachment.mimeType,
                     savedFiles,
+                    duplicateCheck: null,
                     status: response.status,
                     response: response.body
                 });

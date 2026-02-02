@@ -3616,5 +3616,113 @@
     "gloss": "francisco de villagra 35",
     "customFields": [],
     "isTransferDocument": true
+  },
+  {
+    "documentType": "FVAELECT",
+    "firstFolio": 0,
+    "lastFolio": 0,
+    "externalDocumentID": "20260202175806",
+    "emissionDate": {
+      "day": "5",
+      "month": "2",
+      "year": "2026"
+    },
+    "firstFeePaid": {
+      "day": "6",
+      "month": "2",
+      "year": "2026"
+    },
+    "clientFile": "77.548.005-K",
+    "contactIndex": "ARRIETA CAÑAS 5726",
+    "rutMandante": "",
+    "paymentCondition": "CONTADO",
+    "sellerFileId": "FJAMIS",
+    "clientAnalysis": {
+      "accountNumber": "1110401001",
+      "businessCenter": "",
+      "classifier01": "",
+      "classifier02": ""
+    },
+    "billingCoin": "PESO",
+    "billingRate": 1,
+    "shopId": "Local",
+    "priceList": "1",
+    "giro": "COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS",
+    "district": "LA REINA",
+    "city": "SANTIAGO",
+    "contact": -1,
+    "attachedDocuments": [],
+    "storage": {
+      "code": "",
+      "motive": "",
+      "storageAnalysis": {
+        "accountNumber": "",
+        "businessCenter": "",
+        "classifier01": "",
+        "classifier02": ""
+      }
+    },
+    "details": [
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780069",
+        "count": 1,
+        "productName": "Franuí Chocolate Amargo Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 78960,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      },
+      {
+        "type": "A",
+        "isExempt": false,
+        "code": "17798147780052",
+        "count": 1,
+        "productName": "Franuí Chocolate Leche Caja 24 Unidades",
+        "productNameBarCode": "",
+        "price": 78960,
+        "discount": {
+          "type": 0,
+          "value": 0
+        },
+        "unit": "CAJA",
+        "analysis": {
+          "accountNumber": "3110101001",
+          "businessCenter": "EMPNEGVTAVTA000",
+          "classifier01": "",
+          "classifier02": ""
+        },
+        "useBatch": false,
+        "batchInfo": []
+      }
+    ],
+    "saleTaxes": [
+      {
+        "code": "IVA",
+        "value": 19,
+        "taxeAnalysis": {
+          "accountNumber": "2120301001",
+          "businessCenter": "",
+          "classifier01": "",
+          "classifier02": ""
+        }
+      }
+    ],
+    "ventaRecDesGlobal": [],
+    "gloss": "arrieta cañas 5726",
+    "customFields": [],
+    "isTransferDocument": true
   }
 ]
