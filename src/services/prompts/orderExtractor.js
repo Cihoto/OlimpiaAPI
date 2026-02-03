@@ -263,6 +263,7 @@ Pedido_Cantidad_Free (150g, 24 unidades, sin azúcar):
 - Franui Chocolate Free
 - Caja Franui Free
 - Chocolate Free
+- Franui Free (sin azúcar)
 
 === PRODUCTOS DE 90 GRAMOS (18 unidades por caja) ===
 

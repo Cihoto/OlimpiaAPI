@@ -178,120 +178,47 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
         console.log("deliveryDayIndexes", deliveryDayIndexes);
         
-        let deliveryIndex = null;
-        // Convert emailDate to Chile timezone and get the day index
-        emailDate = moment.tz(emailDate, 'America/Santiago');
-        console.log(`Debe ser traido a la zona horaria de Chile ${emailDate}`);
-        const emailDateDayIndex = emailDate.day();
-       
-        // Solo obtener la hora local de la fecha sin convertir a otra zona horaria
-        // Obtener la hora en horario chileno (America/Santiago)
-        // const emailDateHour = moment.tz(emailDate, 'YYYY-MM-DDTHH:mm:ss.SSSZ', 'America/Santiago').hour();
-        const emailDateHour = emailDate.hour();
-        const emailDateFormatted = moment(emailDate).format("YYYY-MM-DD");
+        let emailMoment = emailDate
+            ? moment.tz(emailDate, 'America/Santiago')
+            : moment.tz('America/Santiago');
+        console.log(`Debe ser traido a la zona horaria de Chile ${emailMoment}`);
 
-        let daysForNextDelivery = null;
+        const emailDateDayIndex = emailMoment.day();
+        const emailDateHour = emailMoment.hour();
+        const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
 
-        //encontrar el proximo indice de entrega
-        for (let i = 0; i < deliveryDayIndexes.length; i++) {
-            // console.log("deliveryDayIndexes", deliveryDayIndexes[i]);
-            const deliveryDayIndex = deliveryDayIndexes[i].index;
+        const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
+        const upcomingDeliveries = [];
 
-            if (emailDateDayIndex == 6 || emailDateDayIndex == 0) {
-
-                const hasMondayDelivery = deliveryDayIndexes.some(day => day.index === 1);
-
-                console.log("¿La comuna tiene despacho los lunes?", hasMondayDelivery);
-                console.log("¿La comuna tiene despacho los lunes?", hasMondayDelivery);
-                
-                if (hasMondayDelivery) {
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-                }else{
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                }
-
-                break;
-            }
-
-            if (emailDateDayIndex == 5) {
-                console.log("____________________________a____________________________________________________")
-
-                deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
-                // daysForNextDelivery = deliveryIndex;
-                // break;
-                const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
-
-                // deliveryIndex = daysToNextDelivery;
-                // break;
-                // if (daysToNextDelivery > 1) {
-                //     deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                //     break;
-                // }
-                if (emailDateHour >= 12) {
-                    const hasMondayDelivery = deliveryDayIndexes.some(day => day.index === 1);
-
-                    if(hasMondayDelivery){
-                        deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-                    }else{
-                        deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                    }
-                    
-                } else {
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                }
-                break;
-            }
-
-            if (deliveryDayIndex > emailDateDayIndex) {
-
-                
-                deliveryIndex = DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDateHour)
-                daysForNextDelivery = deliveryIndex;
-
-                const daysToNextDelivery = diffToNextDeliveryDay(deliveryDayIndexes, i, emailDateFormatted);
-                console.log("______daysToNextDelivery______", daysToNextDelivery);
-
-                if (daysToNextDelivery > 1) {
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                    break;
-                }
-                
-                console.log("ES MENOR A UNO");
-                console.log("emailDateHour", emailDateHour);
-
-                if (emailDateHour >= 12) {
-                    console.log("PASADA LA HORA DE CORTE", emailDateHour)
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 1)
-                } else {
-                    console.log("ANTES DE LA HORA DE CORTE", emailDateHour)
-                    deliveryIndex = moveForward(deliveryDayIndexes.length, i, 0)
-                }
-                break;
+        for (let offset = 1; offset <= 14 && upcomingDeliveries.length < 2; offset++) {
+            const candidate = emailMoment.clone().add(offset, 'day');
+            if (deliveryDayIndexSet.has(candidate.day())) {
+                upcomingDeliveries.push(candidate);
             }
         }
 
-        // Get the day name using the deliveryIndex
-        const deliveryObj = deliveryDayIndexes[deliveryIndex]
-        console.log("deliveryIndex", deliveryIndex)
-        console.log("deliveryObj", deliveryObj)
-        // teniendo en cuenta deliveryObject.dayName que puede ser LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, buscar la fecha futura mas cercana que sea igual a la fecha de entrega teniendo como punto de partida la fecha del correo
-        let deliveryDate = null;
-        let date = emailDate;
-        // while (deliveryObj.index != deliveryDate || counter <= 10) {
-        // while (deliveryObj.index != deliveryDate || counter < 10) {
-        console.log("este es el valor a evaluar", daysForNextDelivery)
-        if(daysForNextDelivery == 0){
-            date = moment(emailDate).add("1",'days').format("YYYY-MM-DD");
-        }else{
-            while (deliveryObj.index != deliveryDate) {
-                date = moment(date).add(1, 'day').format("YYYY-MM-DD");
-                const dayOfWeek = moment(date).day();
-                deliveryDate = dayOfWeek;
+        if (upcomingDeliveries.length === 0) {
+            return null;
+        }
+
+        let selectedDelivery = upcomingDeliveries[0];
+
+        if (!isWeekend) {
+            if (emailDateDayIndex === 5) {
+                if (emailDateHour >= 12 && upcomingDeliveries[1]) {
+                    selectedDelivery = upcomingDeliveries[1];
+                }
+            } else if (emailDateHour >= 12 && upcomingDeliveries[1]) {
+                const diffToFirst = upcomingDeliveries[0].diff(emailMoment.clone().startOf('day'), 'days');
+                if (diffToFirst <= 2) {
+                    selectedDelivery = upcomingDeliveries[1];
+                }
             }
         }
-        // const deliveryDate = moment(emailDate).day(deliveryObj.index).format("YYYY/MM/DD");
-        console.log("date", date)
-        return date
+
+        const formattedDate = selectedDelivery.format("YYYY-MM-DD");
+        console.log("date", formattedDate);
+        return formattedDate;
         // return {deliveryIndex, moment(deliveryIndex).format("YYYY/MM/DD HH:mm:ss")};
     } catch (e) {
         console.log("error", e)

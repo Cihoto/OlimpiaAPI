@@ -491,7 +491,21 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         });
 
         const jsonResponse = response.choices[0].message.content.trim();
-        const sanitizedOutput = jsonResponse.replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
+        // Fix numbers with thousand separators (e.g., 1.098.240 -> 1098240, 208.665.60 -> 208665.60)
+        const sanitizedOutput = jsonResponse
+            .replace(/```json|```/g, '')
+            .replace(/\n/g, '')
+            .replace(/\\/g, '')
+            .replace(/":\s*(\d{1,3}(?:\.\d{3})+(?:\.\d{1,2})?)\s*([,\}\]])/g, (match, num, ending) => {
+                const parts = num.split('.');
+                // If the last part has 1-2 digits, treat it as decimal
+                if (parts.length > 1 && parts[parts.length - 1].length <= 2) {
+                    const decimal = parts.pop();
+                    return '": ' + parts.join('') + '.' + decimal + ending;
+                }
+                // Otherwise, all dots are thousand separators
+                return '": ' + num.replace(/\./g, '') + ending;
+            });
         console.log("***********************************************SANITIZED OUTPUT *************************************************");
         console.log({ sanitizedOutput });
         
