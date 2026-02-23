@@ -187,6 +187,66 @@ async function readCSV(req, res) {
     }
 }
 
+/**
+ * Fixes unescaped double-quotes that sit inside JSON string values.
+ * Strategy: walk the string char-by-char; when inside a string and we hit a `"`,
+ * look-ahead (skipping whitespace) to see if the next meaningful character is one
+ * of `,`, `}`, `]`, `:` — if so it is a structural (closing) quote; otherwise
+ * it is an internal quote that must be escaped with `\`.
+ */
+function fixUnescapedJsonQuotes(str) {
+    try {
+        JSON.parse(str);
+        return str; // already valid
+    } catch (_) {
+        // needs fixing
+    }
+
+    const result = [];
+    let inString = false;
+
+    for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+
+        // Pass through already-escaped characters inside a string
+        if (ch === '\\' && inString) {
+            result.push(ch);
+            if (i + 1 < str.length) {
+                result.push(str[i + 1]);
+                i++;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            if (!inString) {
+                // Opening quote
+                inString = true;
+                result.push(ch);
+            } else {
+                // Look-ahead: skip whitespace, check next meaningful char
+                let j = i + 1;
+                while (j < str.length && /\s/.test(str[j])) j++;
+                const next = str[j] || '';
+
+                if (next === ',' || next === '}' || next === ']' || next === ':' || j >= str.length) {
+                    // Structural closing quote
+                    inString = false;
+                    result.push(ch);
+                } else {
+                    // Internal quote — escape it
+                    result.push('\\');
+                    result.push(ch);
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    return result.join('');
+}
+
 async function readEmailBody(req, res) {
 
     const plainText = req.body;
@@ -194,10 +254,16 @@ async function readEmailBody(req, res) {
         // console.log("hola",req.body)
         // console.log("Received plainText:", plainText);
 
-        // Sanitize the email body
-        const sanitizedEmailBody = plainText
-            .replaceAll(/\s+/g, ' ') // Remove all white spaces
-            .trim(); // Trim leading and trailing spaces
+        // Sanitize the email body:
+        // 1. Collapse all whitespace (newlines, tabs, etc.) to single spaces
+        // 2. Fix any unescaped double-quotes inside JSON string values
+        const sanitizedEmailBody = fixUnescapedJsonQuotes(
+            plainText
+                .replaceAll(/\s+/g, ' ') // Remove all white spaces
+                .trim() // Trim leading and trailing spaces
+        );
+        
+            console.log("sanitizedEmailBody", sanitizedEmailBody);
 
         const {
             emailBody,
