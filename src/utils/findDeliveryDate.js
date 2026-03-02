@@ -190,7 +190,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
         const upcomingDeliveries = [];
 
-        for (let offset = 1; offset <= 14 && upcomingDeliveries.length < 2; offset++) {
+        for (let offset = 1; offset <= 14; offset++) {
             const candidate = emailMoment.clone().add(offset, 'day');
             if (deliveryDayIndexSet.has(candidate.day())) {
                 upcomingDeliveries.push(candidate);
@@ -213,6 +213,16 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
                 if (diffToFirst <= 2) {
                     selectedDelivery = upcomingDeliveries[1];
                 }
+            }
+        }
+
+        // Weekend-only rule: if selected delivery is Monday, move to next available delivery day.
+        if (isWeekend && selectedDelivery.day() === 1) {
+            const nextNonMondayDelivery = upcomingDeliveries.find((candidate) => (
+                candidate.isAfter(selectedDelivery, 'day') && candidate.day() !== 1
+            ));
+            if (nextNonMondayDelivery) {
+                selectedDelivery = nextNonMondayDelivery;
             }
         }
 
