@@ -1079,7 +1079,9 @@ async function readEmailBodyFromGmail(req, res) {
                 }
             }
 
+            const success = results.every((result) => result.status >= 200 && result.status < 300);
             return res.status(200).json({
+                success,
                 messageId,
                 sender,
                 subject: emailSubject,
@@ -1137,7 +1139,9 @@ async function readEmailBodyFromGmail(req, res) {
             }
         }
 
+        const success = results.every((result) => result.status >= 200 && result.status < 300);
         return res.status(200).json({
+            success,
             messageId,
             sender,
             subject: emailSubject,
