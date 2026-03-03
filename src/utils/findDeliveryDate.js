@@ -77,7 +77,7 @@ const deliveryDays = [
             "CERRILLOS",
             "MACUL",
             "ÑUÑOA"
-        ]
+        ] 
     },
     {
         index: 3,
@@ -139,6 +139,26 @@ const deliveryDays = [
     }
 ];
 
+function normalizeCommunityName(value) {
+    return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function getDeliveryDayIndexesByComuna(comunaToSearch) {
+    if (!comunaToSearch || typeof comunaToSearch !== 'string') {
+        return [];
+    }
+
+    const normalizedComuna = normalizeCommunityName(comunaToSearch);
+    return deliveryDays
+        .filter(day => day.communities.some(community => normalizeCommunityName(community) === normalizedComuna))
+        .map(day => ({ index: day.index, dayName: day.dayName }))
+        .sort((a, b) => a.index - b.index);
+}
+
+function getAllDeliveryCommunities() {
+    return [...uniqueCommunities];
+}
+
 function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
     try {
@@ -154,28 +174,17 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
 
         // Check if the comunaToSearch is in the list of unique communities
-        const isValidCommunity = uniqueCommunities.find(community => {
-            const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-            return normalize(community) === normalize(comunaToSearch);
-        });
+        const normalizedComuna = normalizeCommunityName(comunaToSearch);
+        const isValidCommunity = uniqueCommunities.some(
+            community => normalizeCommunityName(community) === normalizedComuna
+        );
 
         if (!isValidCommunity) {
             return null; // Invalid community
         }
 
         // Find all indexes of the delivery days that match the comunaToSearch
-        const deliveryDayIndexes = deliveryDays
-            .filter(day => day.communities.some(community => {
-                const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-                return normalize(community) === normalize(comunaToSearch);
-            }))
-            .map(day => {
-                return {
-                    index: day.index,
-                    dayName: day.dayName
-                }
-            });
-        deliveryDayIndexes.sort((a, b) => a.index - b.index); // Sort by index
+        const deliveryDayIndexes = getDeliveryDayIndexesByComuna(comunaToSearch);
         console.log("deliveryDayIndexes", deliveryDayIndexes);
         
         let emailMoment = emailDate
@@ -186,6 +195,9 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const emailDateDayIndex = emailMoment.day();
         const emailDateHour = emailMoment.hour();
         const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
+        const isFriday = emailDateDayIndex === 5;
+        const isAfterCutoff = emailDateHour >= 12;
+        const isWeekendLikeBlock = (isFriday && isAfterCutoff) || isWeekend;
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
         const upcomingDeliveries = [];
@@ -203,26 +215,16 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
 
         let selectedDelivery = upcomingDeliveries[0];
 
-        if (!isWeekend) {
-            if (emailDateDayIndex === 5) {
-                if (emailDateHour >= 12 && upcomingDeliveries[1]) {
-                    selectedDelivery = upcomingDeliveries[1];
-                }
-            } else if (emailDateHour >= 12 && upcomingDeliveries[1]) {
-                const diffToFirst = upcomingDeliveries[0].diff(emailMoment.clone().startOf('day'), 'days');
-                if (diffToFirst <= 2) {
-                    selectedDelivery = upcomingDeliveries[1];
-                }
+        if (isWeekendLikeBlock) {
+            const hasMondayDelivery = deliveryDayIndexSet.has(1);
+            if (hasMondayDelivery && selectedDelivery.day() === 1 && upcomingDeliveries[1]) {
+                selectedDelivery = upcomingDeliveries[1];
             }
-        }
-
-        // Weekend-only rule: if selected delivery is Monday, move to next available delivery day.
-        if (isWeekend && selectedDelivery.day() === 1) {
-            const nextNonMondayDelivery = upcomingDeliveries.find((candidate) => (
-                candidate.isAfter(selectedDelivery, 'day') && candidate.day() !== 1
-            ));
-            if (nextNonMondayDelivery) {
-                selectedDelivery = nextNonMondayDelivery;
+        } else if (isAfterCutoff && upcomingDeliveries[1]) {
+            const diffToFirst = upcomingDeliveries[0].diff(emailMoment.clone().startOf('day'), 'days');
+            // Weekday rule: only skip to the next slot if the closest delivery is tomorrow.
+            if (diffToFirst === 1) {
+                selectedDelivery = upcomingDeliveries[1];
             }
         }
 
@@ -315,3 +317,4 @@ function diffToNextDeliveryDay(deliveryDayIndexes, nextIndex, orderDate) {
 // export default findDeliveryDayByComuna; // Uncomment this line if using ES6 modules
 
 export default findDeliveryDayByComuna; // Export the function for use in other files
+export { getAllDeliveryCommunities, getDeliveryDayIndexesByComuna };
