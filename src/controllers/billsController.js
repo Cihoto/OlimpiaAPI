@@ -84,8 +84,7 @@ async function createBill(req, res) {
         console.log("+++++++++++++++++++++++JSON DE DOUCMENTO PARA DEFONTANA+++++++++++++++++++++++");
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("BILLJSON", BILLJSON);
-
-
+        
         //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
         let prodQtyToAdd = 0;
         BILLJSON.details.forEach(item => {

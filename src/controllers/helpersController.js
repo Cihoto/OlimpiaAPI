@@ -7,7 +7,11 @@ import XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
 import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
-import { analyzeOrderEmail, analyzeOrderEmailFromGmail } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
+import {
+    analyzeOrderEmail,
+    analyzeOrderEmailFromGmail,
+    extractPedidosYaOrderNumber
+} from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
 import {
     findProcessedKeyLogisticsOrder,
@@ -24,6 +28,7 @@ import {
 } from '../utils/Google/gmail.js';
 const client = new OpenAI();
 const KEY_LOGISTICS_BLOCKED_RUTS = new Set(['77.419.327-8', '96.930.440-6']);
+const PEDIDOS_YA_SENDER = 'compras.marketds@pedidosya.com';
 
 // Normalize CSV record keys/values to expected canonical keys
 function normalizeClientRecord(raw) {
@@ -271,7 +276,9 @@ async function readEmailBody(req, res) {
             emailAttached,
             emailDate,
             source,
-            keyLogistics
+            keyLogistics,
+            sender,
+            attachmentFilename
         } = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
 
         console.log(JSON.parse(sanitizedEmailBody));
@@ -607,6 +614,18 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             const normalizedRut = validJson.Rut ? normalizeRut(validJson.Rut) : '';
             if (normalizedRut && KEY_LOGISTICS_BLOCKED_RUTS.has(normalizedRut)) {
                 validJson.Rut = null;
+            }
+        }
+
+        if (source === 'gmail' && String(sender || '').toLowerCase() === PEDIDOS_YA_SENDER) {
+            const extractedOrderNumber = extractPedidosYaOrderNumber({
+                attachmentFilename,
+                emailAttached,
+                emailSubject,
+                emailBody
+            });
+            if (extractedOrderNumber) {
+                validJson.Orden_de_Compra = extractedOrderNumber;
             }
         }
 
@@ -1035,6 +1054,8 @@ async function readEmailBodyFromGmail(req, res) {
                         emailAttached: pdfText,
                         emailDate,
                         source: 'gmail',
+                        sender,
+                        attachmentFilename: attachment.filename,
                         keyLogistics: keyLogisticsData
                     };
 
@@ -1117,7 +1138,9 @@ async function readEmailBodyFromGmail(req, res) {
                     emailSubject,
                     emailAttached: excelText,
                     emailDate,
-                    source: 'gmail'
+                    source: 'gmail',
+                    sender,
+                    attachmentFilename: attachment.filename
                 };
 
                 const response = await runReadEmailBodyPayload(payload);

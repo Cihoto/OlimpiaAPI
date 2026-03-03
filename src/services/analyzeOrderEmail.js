@@ -226,6 +226,46 @@ function parsePedidosYaOrderQuantities(emailContent) {
     }
 }
 
+function extractOrderNumberFromText(value) {
+    if (!value) {
+        return null;
+    }
+
+    const match = String(value).toUpperCase().match(/\bPO\s*[-_]?(\d{5,})\b/);
+    if (!match) {
+        return null;
+    }
+
+    return `PO${match[1]}`;
+}
+
+function extractPedidosYaOrderNumber(emailContent) {
+    try {
+        const payload = typeof emailContent === 'string' ? JSON.parse(emailContent) : emailContent;
+        if (!payload || typeof payload !== 'object') {
+            return null;
+        }
+
+        const candidates = [
+            payload.attachmentFilename,
+            payload.emailAttached,
+            payload.emailSubject,
+            payload.emailBody
+        ];
+
+        for (const candidate of candidates) {
+            const extracted = extractOrderNumberFromText(candidate);
+            if (extracted) {
+                return extracted;
+            }
+        }
+
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
 
 let openaiClient = null;
 function getOpenAIClient() {
@@ -367,4 +407,9 @@ function normalizeOrderQuantities(data) {
     return output;
 }
 
-export { analyzeOrderEmail, analyzeOrderEmailFromGmail, parsePedidosYaOrderQuantities };
+export {
+    analyzeOrderEmail,
+    analyzeOrderEmailFromGmail,
+    parsePedidosYaOrderQuantities,
+    extractPedidosYaOrderNumber
+};
