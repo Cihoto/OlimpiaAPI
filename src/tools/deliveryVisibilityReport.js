@@ -7,7 +7,7 @@ import findDeliveryDayByComuna, {
 } from '../utils/findDeliveryDate.js';
 
 const TZ = 'America/Santiago';
-const DEFAULT_HOURS = ['09:00', '11:59', '12:00', '12:03', '16:30'];
+const DEFAULT_HOURS = ['09:00', '13:59', '14:00', '14:03', '16:30'];
 const WEEKDAY_NAMES = ['DOMINGO', 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO'];
 
 function parseArgs(argv) {
@@ -92,7 +92,7 @@ function printHelp() {
     console.log('');
     console.log('Opciones:');
     console.log('  --month=YYYY-MM           Mes a evaluar (default: mes actual en America/Santiago)');
-    console.log('  --hours=HH:mm,HH:mm       Horas de prueba por dia (default: 09:00,11:59,12:00,12:03,16:30)');
+    console.log('  --hours=HH:mm,HH:mm       Horas de prueba por dia (default: 09:00,13:59,14:00,14:03,16:30)');
     console.log('  --comuna="NOMBRE"         Probar una comuna especifica (default: todas)');
     console.log('  --max-comunas=N           Limitar cantidad de comunas (util para debugging)');
     console.log('  --write-csv=RUTA          Exportar tambien a CSV');
@@ -217,7 +217,7 @@ function main() {
 
             for (const hour of options.hours) {
                 const orderMoment = moment.tz(`${dateLabel} ${hour}`, 'YYYY-MM-DD HH:mm', TZ);
-                const isFridayAfterCutoff = orderMoment.day() === 5 && orderMoment.hour() >= 12;
+                const isFridayAfterCutoff = orderMoment.day() === 5 && orderMoment.hour() >= 14;
                 const isWeekend = orderMoment.day() === 6 || orderMoment.day() === 0;
                 const mode = isFridayAfterCutoff || isWeekend ? 'VIERNES_FINDE' : 'SEMANA';
 

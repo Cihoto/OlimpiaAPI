@@ -196,7 +196,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const emailDateHour = emailMoment.hour();
         const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
         const isFriday = emailDateDayIndex === 5;
-        const isAfterCutoff = emailDateHour >= 12;
+        const isAfterCutoff = emailDateHour >= 14;
         const isWeekendLikeBlock = (isFriday && isAfterCutoff) || isWeekend;
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
@@ -249,7 +249,7 @@ function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDat
         // break;
     }
 
-    if (emailDateHour >= 12) {
+    if (emailDateHour >= 14) {
         return moveForward(deliveryDayIndexes.length, i, 1)
     } else {
         // console.log({ emailDateHour })
