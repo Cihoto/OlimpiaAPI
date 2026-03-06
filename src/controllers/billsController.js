@@ -22,11 +22,17 @@ function pickFirstDefinedValue(candidates) {
 
 function resolveInvoiceStatus(defontanaResponse) {
     if (!defontanaResponse) {
-        return FACTURADO_STATUS;
+        return 'error';
     }
 
     if (defontanaResponse.success === false || defontanaResponse.error) {
         return 'error';
+    }
+
+    // Defontana success payload example:
+    // { success: true, message: "Venta Guardada Exitosamente", ... }
+    if (defontanaResponse.success === true) {
+        return FACTURADO_STATUS;
     }
 
     const statusCandidate = pickFirstDefinedValue([
@@ -39,7 +45,7 @@ function resolveInvoiceStatus(defontanaResponse) {
     ]);
 
     if (!statusCandidate) {
-        return FACTURADO_STATUS;
+        return 'error';
     }
 
     const normalizedStatus = String(statusCandidate).toLowerCase().trim();
@@ -50,10 +56,6 @@ function resolveInvoiceStatus(defontanaResponse) {
         normalizedStatus === 'ok' ||
         normalizedStatus === 'success'
     ) {
-        return FACTURADO_STATUS;
-    }
-
-    if (defontanaResponse.success === true) {
         return FACTURADO_STATUS;
     }
 
@@ -303,6 +305,96 @@ async function createBill(req, res) {
 
         let createBillDefontanaResponse = null;
 
+        //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
+        let prodQtyToAdd = 0;
+        BILLJSON.details.forEach(item => {
+            console.log("item.count", item);
+            prodQtyToAdd += item.count;
+        });
+
+        console.log("prodQtyToAdd", prodQtyToAdd);
+
+        if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
+            const normalizedRegion = String(body.region || '').toUpperCase().trim();
+            console.log("Agregando costo de despacho segun region:", body.region);
+            if (normalizedRegion === "RM") {
+                BILLJSON.details.push({
+                    "type": "A",
+                    "isExempt": false,
+                    "code": "70724043633538",
+                    "count": 1,
+                    "productName": "DESPACHO RM",
+                    "productNameBarCode": "",
+                    "price": 5000,
+                    "discount": {
+                        "type": 0,
+                        "value": 0
+                    },
+                    "unit": "UN",
+                    "analysis": {
+                        "accountNumber": "3110101001",
+                        "businessCenter": "EMPNEGVTAVTA000",
+                        "classifier01": "",
+                        "classifier02": ""
+                    },
+                    "useBatch": false,
+                    "batchInfo": []
+                });
+            }
+
+            if (normalizedRegion === "V" || normalizedRegion === "VI") {
+                BILLJSON.details.push({
+                    "type": "A",
+                    "isExempt": false,
+                    "code": "70724043633553",
+                    "count": 1,
+                    "productName": "DESPACHO V y VI",
+                    "productNameBarCode": "",
+                    "price": 10000,
+                    "discount": {
+                        "type": 0,
+                        "value": 0
+                    },
+                    "unit": "UN",
+                    "analysis": {
+                        "accountNumber": "3110101001",
+                        "businessCenter": "EMPNEGVTAVTA000",
+                        "classifier01": "",
+                        "classifier02": ""
+                    },
+                    "useBatch": false,
+                    "batchInfo": []
+                });
+            }
+        }
+
+        // let existingBills = [];
+        // if (fs.existsSync(filePath)) {
+        //     const fileContent = fs.readFileSync(filePath, 'utf-8');
+        //     existingBills = JSON.parse(fileContent);
+        // }
+
+        // existingBills.push(BILLJSON);
+
+        // fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
+
+        console.log(BILLJSON);
+
+        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
+        console.log("saveSaleURL", saveSaleURL);
+        const createBillDefontana = await fetch(saveSaleURL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${req.apiKey}`
+            },
+            body: JSON.stringify(BILLJSON)
+        });
+
+        createBillDefontanaResponse = await createBillDefontana.json();
+        console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+
+
         let notificationEmail;
         try {
             notificationEmail = await maybeSendInvoiceNotification({
@@ -329,103 +421,9 @@ async function createBill(req, res) {
             responsePayload.createBillDefontanaResponse = createBillDefontanaResponse;
         }
 
-        return res.status(200).json(responsePayload);
-        
-        // //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
-        // let prodQtyToAdd = 0;
-        // BILLJSON.details.forEach(item => {
-        //     console.log("item.count", item);
-        //     prodQtyToAdd += item.count;
-        // });
+        res.status(200).json(responsePayload);
 
-        // console.log("prodQtyToAdd", prodQtyToAdd);
-
-        // if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
-        //     console.log("Agregando costo de despacho segun region:", body.region);
-        //     if (body.region === "RM") {
-        //         BILLJSON.details.push({
-        //             "type": "A",
-        //             "isExempt": false,
-        //             "code": "70724043633538",
-        //             "count": 1,
-        //             "productName": "DESPACHO RM",
-        //             "productNameBarCode": "",
-        //             "price": 5000,
-        //             "discount": {
-        //                 "type": 0,
-        //                 "value": 0
-        //             },
-        //             "unit": "UN",
-        //             "analysis": {
-        //                 "accountNumber": "3110101001",
-        //                 "businessCenter": "EMPNEGVTAVTA000",
-        //                 "classifier01": "",
-        //                 "classifier02": ""
-        //             },
-        //             "useBatch": false,
-        //             "batchInfo": []
-        //         });
-        //     }
-
-        //     if (bill.region === "V" || bill.region === "VI") {
-        //         BILLJSON.details.push({
-        //             "type": "A",
-        //             "isExempt": false,
-        //             "code": "70724043633553",
-        //             "count": 1,
-        //             "productName": "DESPACHO V y VI",
-        //             "productNameBarCode": "",
-        //             "price": 10000,
-        //             "discount": {
-        //                 "type": 0,
-        //                 "value": 0
-        //             },
-        //             "unit": "UN",
-        //             "analysis": {
-        //                 "accountNumber": "3110101001",
-        //                 "businessCenter": "EMPNEGVTAVTA000",
-        //                 "classifier01": "",
-        //                 "classifier02": ""
-        //             },
-        //             "useBatch": false,
-        //             "batchInfo": []
-        //         });
-        //     }
-        // }
-
-        // let existingBills = [];
-        // if (fs.existsSync(filePath)) {
-        //     const fileContent = fs.readFileSync(filePath, 'utf-8');
-        //     existingBills = JSON.parse(fileContent);
-        // }
-
-        // existingBills.push(BILLJSON);
-
-        // fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
-
-        // console.log(BILLJSON);
-
-        // const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-        // console.log("saveSaleURL", saveSaleURL);
-        // const createBillDefontana = await fetch(saveSaleURL, {
-        //     method: 'POST',
-        //     headers: {
-        //         'Content-Type': 'application/json',
-        //         Authorization: `Bearer ${req.apiKey}`
-        //     },
-        //     body: JSON.stringify(BILLJSON)
-        // });
-
-        // createBillDefontanaResponse = await createBillDefontana.json();
-        // console.log("createBillDefontanaResponse", createBillDefontanaResponse);
-
-        // res.status(200).json({
-        //     createBillDefontanaResponse,
-        //     success: true,
-        //     data: BILLJSON
-        // });
-
-        // return;
+        return;
 
         // const checkIssuedBillURL = `https://replapi.defontana.com/api/Sale/GetSaleByExternalDocumentID?externalDocumentID=1101997304`
         // const checkIssuedBill = await fetch(checkIssuedBillURL,{
