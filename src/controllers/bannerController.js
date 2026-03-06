@@ -12,10 +12,27 @@ const BANNED_BUSINESS = [
     "QUINTO CENTRO SPA",,
     "keylogistics",
     "keylogistics.cl",
+    "aramark",
+    "aramark.cl",
     "keyLogistics (ESMAX)",
     ""
 
 ]
+
+const BANNED_EMAIL_DOMAINS = new Set(["aramark.cl"]);
+
+function extractEmailsFromText(text) {
+    const matches = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+    return matches || [];
+}
+
+function findBannedEmailDomain(text) {
+    const emails = extractEmailsFromText(text);
+    return emails.find((email) => {
+        const domain = String(email).toLowerCase().split("@").pop() || "";
+        return BANNED_EMAIL_DOMAINS.has(domain);
+    }) || null;
+}
 
 async function checkifBusinessIsBanned (req,res){
     // if(!req.apiKey) {
@@ -23,7 +40,14 @@ async function checkifBusinessIsBanned (req,res){
     //     return;
     // }
     try {
-        const plainText = req.body;
+        const plainText = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+        const bannedEmail = findBannedEmailDomain(plainText);
+        if (bannedEmail) {
+            return res.json({
+                business: "aramark.cl",
+                banned: true
+            });
+        }
 
         const sanitizedEmailBody = plainText.replace(/[^a-zA-Z0-9\s]/g, '');  
         console.log("sanitizedEmailBody", sanitizedEmailBody);

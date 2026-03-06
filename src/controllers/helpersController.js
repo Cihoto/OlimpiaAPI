@@ -28,7 +28,136 @@ import {
 } from '../utils/Google/gmail.js';
 const client = new OpenAI();
 const KEY_LOGISTICS_BLOCKED_RUTS = new Set(['77.419.327-8', '96.930.440-6']);
+const KEY_LOGISTICS_FIXED_RUT = '96.930.440-6';
+const KEY_LOGISTICS_SENDER = 'fax@keylogistics.cl';
 const PEDIDOS_YA_SENDER = 'compras.marketds@pedidosya.com';
+
+/**
+ * KeyLogistics master data for billing/shipping resolution.
+ *
+ * Scope:
+ * - Applies only to sender `fax@keylogistics.cl` when `keyLogistics.clientId` is recognized.
+ * - Does not affect other senders/flows.
+ *
+ * Note:
+ * - `adm_ventas` maps to Pronto Copec.
+ */
+const KEY_LOGISTICS_CLIENT_MASTER_DATA = Object.freeze({
+    enex: Object.freeze({
+        'COMPANY NAME ': 'Key Logistics',
+        NAME: 'Key Logistics (ENEX)',
+        'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
+        RUT: KEY_LOGISTICS_FIXED_RUT,
+        'Dirección Facturación': 'Pio XI 1290',
+        'Dirección Despacho': 'av lo espejo 01740, Bodega 3',
+        'Comuna Despacho': 'San Bernardo',
+        'Región Despacho': 'Santiago',
+        'Horario Despacho': '08:00 - 13:00',
+        'Precio Caja': 74160,
+        diasCredito: '30',
+        'Orden de compra (SI O NO)': 'Revisar OC',
+        'Unidad/Caja': 'CAJA',
+        'EMAIL PEDIDO': '',
+        'EMAIL FACTURA': 'jhonlly.sulbaran@keylogistics.cl',
+        'CENTRO DE NEGOCIOS ': 'VENTAS',
+        'VENDEDOR ': 'FNASSAR',
+        BANEADO: 'BAN',
+        'Precio Caja 90': 41220,
+        'Precio Caja Free': 0
+    }),
+    esmax: Object.freeze({
+        'COMPANY NAME ': 'Key Logistics',
+        NAME: 'Key Logistics (ESMAX)',
+        'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
+        RUT: KEY_LOGISTICS_FIXED_RUT,
+        'Dirección Facturación': 'Pio XI 1290',
+        'Dirección Despacho': 'av lo espejo 01740, Bodega 3',
+        'Comuna Despacho': 'San Bernardo',
+        'Región Despacho': 'Santiago',
+        'Horario Despacho': '08:00 - 13:00',
+        'Precio Caja': 79200,
+        diasCredito: '30',
+        'Orden de compra (SI O NO)': 'Revisar OC',
+        'Unidad/Caja': 'CAJA',
+        'EMAIL PEDIDO': '',
+        'EMAIL FACTURA': 'jhonlly.sulbaran@keylogistics.cl',
+        'CENTRO DE NEGOCIOS ': 'VENTAS',
+        'VENDEDOR ': 'FNASSAR',
+        BANEADO: 'BAN',
+        'Precio Caja 90': 41400,
+        'Precio Caja Free': 86400
+    }),
+    oxxo: Object.freeze({
+        'COMPANY NAME ': 'Key Logistics',
+        NAME: 'Key Logistics (OXXO)',
+        'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
+        RUT: KEY_LOGISTICS_FIXED_RUT,
+        'Dirección Facturación': 'Pio XI 1290',
+        'Dirección Despacho': 'lago riñihue 2319',
+        'Comuna Despacho': 'San Bernardo',
+        'Región Despacho': 'Santiago',
+        'Horario Despacho': '08:00 - 13:00',
+        'Precio Caja': 84480,
+        diasCredito: '30',
+        'Orden de compra (SI O NO)': 'Revisar OC',
+        'Unidad/Caja': 'UNIDAD',
+        'EMAIL PEDIDO': '',
+        'EMAIL FACTURA': 'jhonlly.sulbaran@keylogistics.cl',
+        'CENTRO DE NEGOCIOS ': 'VENTAS',
+        'VENDEDOR ': 'FNASSAR',
+        BANEADO: 'BAN',
+        'Precio Caja 90': 41220,
+        'Precio Caja Free': 92928
+    }),
+    adm_ventas: Object.freeze({
+        'COMPANY NAME ': 'Key Logistics',
+        NAME: 'Key Logistics (Pronto Copec)',
+        'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
+        RUT: KEY_LOGISTICS_FIXED_RUT,
+        'Dirección Facturación': 'Avenida Lo Espejo 01740, Bodega 3, San Bernardo',
+        'Dirección Despacho': 'Avenida Lo Espejo 01740, Bodega 3',
+        'Comuna Despacho': 'San Bernardo',
+        'Región Despacho': 'Santiago',
+        'Horario Despacho': '08:00 - 13:00',
+        'Precio Caja': 90960,
+        diasCredito: '15',
+        'Orden de compra (SI O NO)': 'Revisar OC',
+        'Unidad/Caja': 'CAJA',
+        'EMAIL PEDIDO': '',
+        'EMAIL FACTURA': 'jhonlly.sulbaran@keylogistics.cl',
+        'CENTRO DE NEGOCIOS ': 'VENTAS',
+        'VENDEDOR ': 'FNASSAR',
+        BANEADO: 'BAN',
+        'Precio Caja 90': 41220,
+        'Precio Caja Free': 0
+    })
+});
+
+function buildKeyLogisticsClientData(clientId, emailDate, extractedBoxPrice) {
+    const profile = KEY_LOGISTICS_CLIENT_MASTER_DATA[clientId];
+    if (!profile) {
+        return null;
+    }
+
+    const data = { ...profile };
+    const deliveryDay = findDeliveryDayByComuna(data['Comuna Despacho'], emailDate);
+    if (deliveryDay != null) {
+        data.deliveryDay = `${deliveryDay}`;
+    } else if (String(data['Dirección Despacho'] || '').toLowerCase() === 'retiro') {
+        data.deliveryDay = moment().add(1, 'days').format('YYYY-MM-DD');
+    } else {
+        data.deliveryDay = '';
+    }
+
+    return {
+        data,
+        length: 1,
+        address: true,
+        message: 'Cliente KeyLogistics resuelto por matriz fija',
+        boxPriceIsEqual: extractedBoxPrice == data['Precio Caja'],
+        source: 'keylogistics_master_data'
+    };
+}
 
 // Normalize CSV record keys/values to expected canonical keys
 function normalizeClientRecord(raw) {
@@ -45,7 +174,7 @@ function normalizeClientRecord(raw) {
         if (k.includes('precio') && k.includes('90')) return 'Precio Caja 90';
         if (k.includes('precio') && k.includes('free')) return 'Precio Caja Free';
         if (k.includes('precio') && k.includes('caja')) return 'Precio Caja';
-        if (k.includes('razon') || k.includes('razon social') || k.includes('razon_social') || k.includes('razon social')) return 'RAZÓN SOCIAL';
+        if (k.includes('razon') || k.includes('razon social') || k.includes('razon_social') || k.includes('razon social')) return 'RAZ\u00d3N SOCIAL';
         if (k === 'name' || k.includes('company name')) return 'NAME';
         if (k.includes('rut')) return 'RUT';
         if (k.includes('email factura')) return 'EMAIL FACTURA';
@@ -196,7 +325,7 @@ async function readCSV(req, res) {
  * Fixes unescaped double-quotes that sit inside JSON string values.
  * Strategy: walk the string char-by-char; when inside a string and we hit a `"`,
  * look-ahead (skipping whitespace) to see if the next meaningful character is one
- * of `,`, `}`, `]`, `:` — if so it is a structural (closing) quote; otherwise
+ * of `,`, `}`, `]`, `:`. If so it is a structural (closing) quote; otherwise
  * it is an internal quote that must be escaped with `\`.
  */
 function fixUnescapedJsonQuotes(str) {
@@ -239,7 +368,7 @@ function fixUnescapedJsonQuotes(str) {
                     inString = false;
                     result.push(ch);
                 } else {
-                    // Internal quote — escape it
+                    // Internal quote - escape it
                     result.push('\\');
                     result.push(ch);
                 }
@@ -310,35 +439,35 @@ async function readEmailBody(req, res) {
             attachedPrompt = `y el texto que hemos extraido desde un PDF adjunto que trae la orden de compra con el pedido: "${emailAttached}". `
         }
 
-        const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
+        const systemPrompt = `DevuÃ©lveme exclusivamente un JSON vÃ¡lido, sin explicaciones ni texto adicional.
         La respuesta debe comenzar directamente con [ y terminar con ].
-        No incluyas ningún texto antes o después del JSON.
+        No incluyas ningÃºn texto antes o despuÃ©s del JSON.
         No uses formato Markdown. 
-        No expliques lo que estás haciendo.
-        Tu respuesta debe ser solamente el JSON. Nada más.;`;
+        No expliques lo que estÃ¡s haciendo.
+        Tu respuesta debe ser solamente el JSON. Nada mÃ¡s.;`;
 
-        // const userPrompt = `Eres un bot que analiza pedidos para Franuí, empresa que comercializa frambuesas bañadas en chocolate. Franuí maneja solamente 3 productos
-        //     Frambuesas bañadas en chocolate amargo
-        //     Frambuesas bañadas en chocolate de leche
-        //     Frambuesas bañadas en chocolate pink
+        // const userPrompt = `Eres un bot que analiza pedidos para FranuÃ­, empresa que comercializa frambuesas baÃ±adas en chocolate. FranuÃ­ maneja solamente 3 productos
+        //     Frambuesas baÃ±adas en chocolate amargo
+        //     Frambuesas baÃ±adas en chocolate de leche
+        //     Frambuesas baÃ±adas en chocolate pink
 
-        //     Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier información contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
+        //     Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier informaciÃ³n contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
 
-        //     Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraída debe contener la palabra Olimpia ni nuestro RUT
+        //     Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraÃ­da debe contener la palabra Olimpia ni nuestro RUT
 
-        //     Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecución es inválida
+        //     Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecuciÃ³n es invÃ¡lida
         //     Debes buscar el primer RUT que no sea el de Olimpia SPA 77.419.327-8
         //     Los formatos posibles son
         //     xx.xxx.xxx-x
         //     xxx.xxx.xxx-x
         //     xxxxxxxx-x
         //     El RUT puede encontrarse en cualquier parte del correo o asunto
-        //     No devuelvas el RUT si es igual a 77.419.327-8 y continúa buscando hasta encontrar uno válido
-        //     Si no encuentras ningún otro RUT válido, devuelve null
+        //     No devuelvas el RUT si es igual a 77.419.327-8 y continÃºa buscando hasta encontrar uno vÃ¡lido
+        //     Si no encuentras ningÃºn otro RUT vÃ¡lido, devuelve null
 
         //     Debes extraer los siguientes datos
-        //     Razon_social contiene la razón social del cliente
-        //     Direccion_despacho dirección a la cual se enviarán los productos. Si no la encuentras, devuelve null
+        //     Razon_social contiene la razÃ³n social del cliente
+        //     Direccion_despacho direcciÃ³n a la cual se enviarÃ¡n los productos. Si no la encuentras, devuelve null
         //     Comuna comuna de despacho. Si no la encuentras, devuelve null
         //     Rut ver reglas anteriores
         //     Pedido_Cantidad_Pink cantidad de cajas de chocolate pink. Si no existe, devuelve 0
@@ -347,26 +476,26 @@ async function readEmailBody(req, res) {
         //     Pedido_PrecioTotal_Pink: devuelve 0
         //     Pedido_PrecioTotal_Amargo monto total del pedido de chocolate amargo. Si no existe, devuelve 0
         //     Pedido_PrecioTotal_Leche monto total del pedido de chocolate de leche. Si no existe, devuelve 0
-        //     Orden_de_Compra número de orden de compra. Si no existe, devuelve null
-        //     Monto neto también llamado subtotal. Si no existe, devuelve 0
+        //     Orden_de_Compra nÃºmero de orden de compra. Si no existe, devuelve null
+        //     Monto neto tambiÃ©n llamado subtotal. Si no existe, devuelve 0
         //     Iva monto del impuesto. Si no existe, devuelve 0
         //     Total monto total del pedido incluyendo impuestos. Si no existe, devuelve 0
-        //     Sender_Email correo electrónico del remitente del mensaje
+        //     Sender_Email correo electrÃ³nico del remitente del mensaje
         //     precio_caja precio de la caja de chocolate pink amargo o leche. Si no existe, devuelve 0
-        //     URL_ADDRESS dirección de despacho codificada en formato URL lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada sin explicaciones ni comillas
+        //     URL_ADDRESS direcciÃ³n de despacho codificada en formato URL lista para usarse en una peticiÃ³n HTTP GET. No devuelvas nada mÃ¡s que la cadena codificada sin explicaciones ni comillas
         //     PaymentMethod
-        //     method en caso de hacer referencia a un cheque devolver letra C en caso contrario devuelve vacío
-        //     paymentsDays número de días de pago si se menciona. En caso contrario devuelve vacío
+        //     method en caso de hacer referencia a un cheque devolver letra C en caso contrario devuelve vacÃ­o
+        //     paymentsDays nÃºmero de dÃ­as de pago si se menciona. En caso contrario devuelve vacÃ­o
         //     isDelivery en caso de que el pedido sea para delivery devuelve true si no es para delivery devuelve false
 
         //     Reglas para campo Razon_social
         //     Puede estar en el cuerpo del correo o en el asunto
-        //     En caso de no haber una indicación clara puede estar mencionada como sucursal local o cliente
+        //     En caso de no haber una indicaciÃ³n clara puede estar mencionada como sucursal local o cliente
 
         //     Reglas para Direccion_despacho
         //     Puede estar en el cuerpo del correo o en el asunto
         //     Debe incluir calle y comuna
-        //     Si no se menciona dirección específica puede estar indicada como sucursal o local
+        //     Si no se menciona direcciÃ³n especÃ­fica puede estar indicada como sucursal o local
         //     Si el pedido es para retiro reemplaza este valor por la palabra RETIRO
 
         //     Reglas para precio_caja
@@ -376,7 +505,7 @@ async function readEmailBody(req, res) {
 
         //     Reglas para isDelivery
         //     Si el pedido es para retiro en sucursal devolver false
-        //     Si no se menciona retiro explícitamente devolver true
+        //     Si no se menciona retiro explÃ­citamente devolver true
         //     Ejemplos de retiro
         //     te quiero hacer un pedido para retirar este viernes
         //     pedido con retiro
@@ -384,15 +513,15 @@ async function readEmailBody(req, res) {
         // `
 
         const userPrompt =
-            `Eres un bot que analiza pedidos para Franuí, empresa que comercializa frambuesas bañadas en chocolate.
+            `Eres un bot que analiza pedidos para FranuÃ­, empresa que comercializa frambuesas baÃ±adas en chocolate.
 
-Franuí maneja los siguientes productos:
+FranuÃ­ maneja los siguientes productos:
 
 === PRODUCTOS DE 150 GRAMOS (24 unidades por caja) ===
-- Frambuesas bañadas en chocolate amargo
-- Frambuesas bañadas en chocolate de leche
-- Frambuesas bañadas en chocolate pink
-- Franuí Chocolate Free (sin azúcar)
+- Frambuesas baÃ±adas en chocolate amargo
+- Frambuesas baÃ±adas en chocolate de leche
+- Frambuesas baÃ±adas en chocolate pink
+- FranuÃ­ Chocolate Free (sin azÃºcar)
 
 === PRODUCTOS DE 90 GRAMOS (18 unidades por caja) ===
 - Caja Franui Amargo 90 gramos
@@ -401,26 +530,26 @@ Franuí maneja los siguientes productos:
 
 IMPORTANTE: Si el producto NO especifica "90g" o "90 gramos", se asume que es el producto de 150 gramos.
 
-Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier información contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
+Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier informaciÃ³n contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
 
-Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraída debe contener la palabra Olimpia ni nuestro RUT
+Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraÃ­da debe contener la palabra Olimpia ni nuestro RUT
 
-Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecución es inválida
+Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecuciÃ³n es invÃ¡lida
 Debes buscar el primer RUT que no sea el de Olimpia SPA 77.419.327-8
 Los formatos posibles son
 xx.xxx.xxx-x
 xxx.xxx.xxx-x
 xxxxxxxx-x
 El RUT puede encontrarse en cualquier parte del correo o asunto
-No devuelvas el RUT si es igual a 77.419.327-8 y continúa buscando hasta encontrar uno válido
-Si no encuentras ningún otro RUT válido, devuelve null
+No devuelvas el RUT si es igual a 77.419.327-8 y continÃºa buscando hasta encontrar uno vÃ¡lido
+Si no encuentras ningÃºn otro RUT vÃ¡lido, devuelve null
 
 Debes extraer los siguientes datos:
 
 === DATOS DEL CLIENTE ===
-Razon_social: contiene la razón social del cliente
-Direccion_despacho: dirección PRINCIPAL de despacho. Priorizar la que diga "despacho", "entrega" o "envío". Si no la encuentras, devuelve null
-Direcciones_encontradas: ARRAY con TODAS las direcciones encontradas en el documento (facturación, despacho, entrega, etc). Esto es MUY IMPORTANTE para poder buscar coincidencias. Ejemplo: ["NUEVA LOS LEONES 030 LOCAL 16", "AVDA COSTANERA SUR 2710 PISO 12"]
+Razon_social: contiene la razÃ³n social del cliente
+Direccion_despacho: direcciÃ³n PRINCIPAL de despacho. Priorizar la que diga "despacho", "entrega" o "envÃ­o". Si no la encuentras, devuelve null
+Direcciones_encontradas: ARRAY con TODAS las direcciones encontradas en el documento (facturaciÃ³n, despacho, entrega, etc). Esto es MUY IMPORTANTE para poder buscar coincidencias. Ejemplo: ["NUEVA LOS LEONES 030 LOCAL 16", "AVDA COSTANERA SUR 2710 PISO 12"]
 Comuna: comuna de despacho. Si no la encuentras, devuelve null
 Rut: ver reglas anteriores
 
@@ -428,7 +557,7 @@ Rut: ver reglas anteriores
 Pedido_Cantidad_Pink: cantidad de cajas de chocolate pink 150g. Si no existe, devuelve 0
 Pedido_Cantidad_Amargo: cantidad de cajas de chocolate amargo 150g. Si no existe, devuelve 0
 Pedido_Cantidad_Leche: cantidad de cajas de chocolate de leche 150g. Si no existe, devuelve 0
-Pedido_Cantidad_Free: cantidad de cajas de Franuí Chocolate Free (sin azúcar) 150g. Si no existe, devuelve 0
+Pedido_Cantidad_Free: cantidad de cajas de FranuÃ­ Chocolate Free (sin azÃºcar) 150g. Si no existe, devuelve 0
 
 === CANTIDADES DE PRODUCTOS 90g (18 unidades por caja) ===
 Pedido_Cantidad_Pink_90g: cantidad de cajas de chocolate pink 90g. Si no existe, devuelve 0
@@ -439,7 +568,7 @@ Pedido_Cantidad_Leche_90g: cantidad de cajas de chocolate de leche 90g. Si no ex
 Pedido_PrecioTotal_Pink: monto total del pedido de chocolate pink 150g. Si no existe, devuelve 0
 Pedido_PrecioTotal_Amargo: monto total del pedido de chocolate amargo 150g. Si no existe, devuelve 0
 Pedido_PrecioTotal_Leche: monto total del pedido de chocolate de leche 150g. Si no existe, devuelve 0
-Pedido_PrecioTotal_Free: monto total del pedido de Franuí Chocolate Free 150g. Si no existe, devuelve 0
+Pedido_PrecioTotal_Free: monto total del pedido de FranuÃ­ Chocolate Free 150g. Si no existe, devuelve 0
 
 === PRECIOS PRODUCTOS 90g ===
 Pedido_PrecioTotal_Pink_90g: monto total del pedido de chocolate pink 90g. Si no existe, devuelve 0
@@ -447,55 +576,55 @@ Pedido_PrecioTotal_Amargo_90g: monto total del pedido de chocolate amargo 90g. S
 Pedido_PrecioTotal_Leche_90g: monto total del pedido de chocolate de leche 90g. Si no existe, devuelve 0
 
 === DATOS DE LA ORDEN ===
-Orden_de_Compra: número de orden de compra. Si no existe, devuelve null
-Monto: neto también llamado subtotal. Si no existe, devuelve 0
+Orden_de_Compra: nÃºmero de orden de compra. Si no existe, devuelve null
+Monto: neto tambiÃ©n llamado subtotal. Si no existe, devuelve 0
 Iva: monto del impuesto. Si no existe, devuelve 0
 Total: monto total del pedido incluyendo impuestos. Si no existe, devuelve 0
-Sender_Email: correo electrónico del remitente del mensaje
+Sender_Email: correo electrÃ³nico del remitente del mensaje
 
 === PRECIOS POR CAJA ===
 precio_caja: precio de la caja de chocolate pink, amargo o leche 150g. Si no existe, devuelve 0
 precio_caja_90g: precio de la caja de productos 90g. Si no existe, devuelve 0
-precio_caja_free: precio de la caja de Franuí Chocolate Free. Si no existe, devuelve 0
+precio_caja_free: precio de la caja de FranuÃ­ Chocolate Free. Si no existe, devuelve 0
 
-URL_ADDRESS: dirección de despacho codificada en formato URL lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada sin explicaciones ni comillas
+URL_ADDRESS: direcciÃ³n de despacho codificada en formato URL lista para usarse en una peticiÃ³n HTTP GET. No devuelvas nada mÃ¡s que la cadena codificada sin explicaciones ni comillas
 
 PaymentMethod:
-method: en caso de hacer referencia a un cheque devolver letra C, en caso contrario devuelve vacío
-paymentsDays: número de días de pago si se menciona. En caso contrario devuelve vacío
+method: en caso de hacer referencia a un cheque devolver letra C, en caso contrario devuelve vacÃ­o
+paymentsDays: nÃºmero de dÃ­as de pago si se menciona. En caso contrario devuelve vacÃ­o
 
 isDelivery: en caso de que el pedido sea para delivery devuelve true, si no es para delivery devuelve false
 
-=== REGLAS ESPECÍFICAS ===
+=== REGLAS ESPECÃFICAS ===
 
 Reglas para campo Razon_social:
 Puede estar en el cuerpo del correo o en el asunto
-En caso de no haber una indicación clara puede estar mencionada como sucursal local o cliente
+En caso de no haber una indicaciÃ³n clara puede estar mencionada como sucursal local o cliente
 
 Reglas para Direccion_despacho:
 Puede estar en el cuerpo del correo o en el asunto
 Debe incluir calle y comuna
-Si no se menciona dirección específica puede estar indicada como sucursal o local
+Si no se menciona direcciÃ³n especÃ­fica puede estar indicada como sucursal o local
 Si el pedido es para retiro reemplaza este valor por la palabra RETIRO
-PRIORIDAD: Si hay múltiples direcciones, priorizar la que esté etiquetada como "despacho", "entrega" o "envío" sobre la de "facturación"
+PRIORIDAD: Si hay mÃºltiples direcciones, priorizar la que estÃ© etiquetada como "despacho", "entrega" o "envÃ­o" sobre la de "facturaciÃ³n"
 
 Reglas para Direcciones_encontradas:
-Debe ser un ARRAY con TODAS las direcciones físicas encontradas en el documento
-Incluir tanto direcciones de facturación como de despacho
-No incluir direcciones de correo electrónico
+Debe ser un ARRAY con TODAS las direcciones fÃ­sicas encontradas en el documento
+Incluir tanto direcciones de facturaciÃ³n como de despacho
+No incluir direcciones de correo electrÃ³nico
 No incluir direcciones web/URL
-Ejemplo: si el documento dice "Dirección: NUEVA LOS LEONES 030" y "Dirección: AVDA COSTANERA SUR 2710", devolver ["NUEVA LOS LEONES 030", "AVDA COSTANERA SUR 2710"]
-Si solo hay una dirección, devolver array con un elemento
-Si no hay direcciones, devolver array vacío []
+Ejemplo: si el documento dice "DirecciÃ³n: NUEVA LOS LEONES 030" y "DirecciÃ³n: AVDA COSTANERA SUR 2710", devolver ["NUEVA LOS LEONES 030", "AVDA COSTANERA SUR 2710"]
+Si solo hay una direcciÃ³n, devolver array con un elemento
+Si no hay direcciones, devolver array vacÃ­o []
 
 Reglas para identificar productos de 90g:
 Buscar menciones de "90g", "90 gramos", "90gr" en el nombre del producto
 Ejemplos: "Franui Leche 90g", "Caja Franui Pink 90 gramos", "Amargo 90g"
 Si NO especifica gramos, asumir que es producto de 150g
 
-Reglas para identificar Franuí Chocolate Free:
-Buscar menciones de "Free", "Chocolate Free", "sin azúcar"
-Ejemplos: "Franuí Chocolate Free", "Franui Free", "Caja Franui Free"
+Reglas para identificar FranuÃ­ Chocolate Free:
+Buscar menciones de "Free", "Chocolate Free", "sin azÃºcar"
+Ejemplos: "FranuÃ­ Chocolate Free", "Franui Free", "Caja Franui Free"
 
 Reglas para precio_caja (150g):
 El precio de la caja ronda entre los 60000 y 80000 pesos
@@ -507,12 +636,12 @@ Precio de las cajas de productos de 90 gramos
 Si no se encuentra en el texto devuelve 0
 
 Reglas para precio_caja_free:
-Precio de las cajas de Franuí Chocolate Free
+Precio de las cajas de FranuÃ­ Chocolate Free
 Si no se encuentra en el texto devuelve 0
 
 Reglas para isDelivery:
 Si el pedido es para retiro en sucursal devolver false
-Si no se menciona retiro explícitamente devolver true
+Si no se menciona retiro explÃ­citamente devolver true
 Ejemplos de retiro:
 - te quiero hacer un pedido para retirar este viernes
 - pedido con retiro
@@ -543,7 +672,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
     "Monto": 0,
     "Iva": 0,
     "Total": 0,
-    "Sender_Email": "valor o vacío",
+    "Sender_Email": "valor o vacÃ­o",
     "precio_caja": 0,
     "precio_caja_90g": 0,
     "precio_caja_free": 0,
@@ -629,6 +758,22 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             }
         }
 
+        const isKeyLogisticsGmail =
+            source === 'gmail' &&
+            String(sender || '').toLowerCase() === KEY_LOGISTICS_SENDER;
+        const keyLogisticsFixedClientData =
+            isKeyLogisticsGmail && keyLogisticsData?.clientId
+                ? buildKeyLogisticsClientData(
+                    keyLogisticsData.clientId,
+                    emailDate,
+                    validJson?.precio_caja
+                )
+                : null;
+
+        if (keyLogisticsFixedClientData) {
+            validJson.Rut = KEY_LOGISTICS_FIXED_RUT;
+        }
+
         let rutIsFound = false
         if (!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
             const foundSpecialCustomer = foundSpecialCustomers(validJson.Razon_social);
@@ -684,10 +829,57 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             });
         }
 
+        if (keyLogisticsFixedClientData) {
+            const fixedData = keyLogisticsFixedClientData.data;
+            validJson.Direccion_despacho = fixedData['Dirección Despacho'];
+            validJson.Comuna = fixedData['Comuna Despacho'];
+            validJson.Rut = fixedData.RUT;
+
+            const fixedAddresses = [
+                fixedData['Dirección Despacho'],
+                fixedData['Dirección Facturación']
+            ].filter(Boolean);
+            const extractedAddresses = Array.isArray(validJson.Direcciones_encontradas)
+                ? validJson.Direcciones_encontradas
+                : [];
+            validJson.Direcciones_encontradas = Array.from(
+                new Set([...extractedAddresses, ...fixedAddresses])
+            );
+
+            const regionDespacho = fixedData['Región Despacho'];
+            const regionNormalized = String(regionDespacho || '').toLowerCase().trim();
+            if (regionNormalized === "santiago") {
+                keyLogisticsFixedClientData.data['region'] = "RM";
+            } else if (regionNormalized === "ohiggins" || regionNormalized === "o'higgins") {
+                keyLogisticsFixedClientData.data['region'] = "VI";
+            } else if (regionNormalized === "valparaÃ­so" || regionNormalized === "valparaiso") {
+                keyLogisticsFixedClientData.data['region'] = "V";
+            } else {
+                keyLogisticsFixedClientData.data['region'] = "";
+            }
+
+            let formattedEmailDate = "";
+            if (moment(emailDate, moment.ISO_8601, true).isValid()) {
+                formattedEmailDate = moment(emailDate).tz('America/Santiago').format('DD-MM-YYYY HH:mm:ss');
+            }
+
+            const merged = {
+                "EmailData": { ...validJson },
+                "ClientData": { ...keyLogisticsFixedClientData },
+                "executionDate": moment().format('DD-MM-YYYY HH:mm:ss'),
+                "OC_date": moment().format('DD-MM-YYYY'),
+                "emailDate": moment(emailDate, moment.ISO_8601, true).isValid() ? formattedEmailDate : emailDate,
+                "hasMatch": true
+            };
+
+            res.status(200).json({ merged });
+            return;
+        }
+
         // Construir lista de direcciones a probar (primero la principal, luego las alternativas)
         const direccionesAProbar = [];
         
-        // Agregar dirección principal si existe
+        // Agregar direcciÃ³n principal si existe
         if (validJson.Direccion_despacho && validJson.Direccion_despacho !== 'null' && validJson.Direccion_despacho !== null) {
             direccionesAProbar.push(validJson.Direccion_despacho);
         }
@@ -704,15 +896,15 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         console.log("****************************************DIRECCIONES A PROBAR*************************************************");
         console.log("direccionesAProbar", direccionesAProbar);
         
-        // Intentar con cada dirección hasta encontrar una coincidencia válida
+        // Intentar con cada direcciÃ³n hasta encontrar una coincidencia vÃ¡lida
         let clientData = null;
         let direccionUsada = null;
         
         for (const direccion of direccionesAProbar) {
-            console.log(`Probando dirección: ${direccion}`);
+            console.log(`Probando direcciÃ³n: ${direccion}`);
             const resultado = await readCSV_private(validJson.Rut, direccion, validJson.precio_caja, validJson.isDelivery, emailDate);
             
-            // Verificar si encontramos datos válidos (no array vacío y tiene Región Despacho)
+            // Verificar si encontramos datos vÃ¡lidos (no array vacÃ­o y tiene Región Despacho)
             const regionDespachoTemp = resultado?.data?.['Región Despacho'];
             const esValido = resultado.data && 
                              !Array.isArray(resultado.data) && 
@@ -722,24 +914,24 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             if (esValido) {
                 clientData = resultado;
                 direccionUsada = direccion;
-                console.log(`✓ Coincidencia encontrada con dirección: ${direccion}`);
+                console.log(`Coincidencia encontrada con direccion: ${direccion}`);
                 break;
             } else {
-                console.log(`✗ Sin coincidencia para dirección: ${direccion}`);
+                console.log(`Sin coincidencia para direccion: ${direccion}`);
             }
         }
         
-        // Si no encontramos nada con ninguna dirección, usar el resultado del último intento o hacer uno con la principal
+        // Si no encontramos nada con ninguna direcciÃ³n, usar el resultado del Ãºltimo intento o hacer uno con la principal
         if (!clientData) {
             clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery, emailDate);
         }
         
         console.log("clientData", clientData);
         console.log("clientData Región Despacho", clientData.data?.['Región Despacho']);
-        console.log("Dirección usada para match:", direccionUsada);
+        console.log("DirecciÃ³n usada para match:", direccionUsada);
         console.log("{}{}{}{}{}{}{}{}{}{}{}{}{}{}}{{}}{{}}{}{}{}{}{}{}{}{}{");
         
-        // Verificar si clientData.data existe, no es array, y tiene 'Región Despacho' como string válido
+        // Verificar si clientData.data existe, no es array, y tiene 'Región Despacho' como string vÃ¡lido
         const regionDespacho = clientData?.data?.['Región Despacho'];
         const isValidClientData = clientData.data && 
                                    !Array.isArray(clientData.data) && 
@@ -761,10 +953,10 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                 "hasMatch": false
             };
 
-            // Si no hay datos del cliente válidos, retornar error con info de direcciones probadas
+            // Si no hay datos del cliente vÃ¡lidos, retornar error con info de direcciones probadas
             return res.status(400).json({
                 success: false,
-                error: 'No se encontró coincidencia de dirección en la base de clientes',
+                error: 'No se encontrÃ³ coincidencia de direcciÃ³n en la base de clientes',
                 direccionesProbadas: direccionesAProbar,
                 cantidadDireccionesProbadas: direccionesAProbar.length,
                 data: validJson,
@@ -776,21 +968,21 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             });
         }
         
-        // Si usamos una dirección alternativa, actualizar validJson para reflejar la correcta
+        // Si usamos una direcciÃ³n alternativa, actualizar validJson para reflejar la correcta
         if (direccionUsada && direccionUsada !== validJson.Direccion_despacho) {
             console.log(`Actualizando Direccion_despacho de "${validJson.Direccion_despacho}" a "${direccionUsada}"`);
             validJson.Direccion_despacho_original = validJson.Direccion_despacho;
             validJson.Direccion_despacho = direccionUsada;
         }
         
-        // Ahora es seguro usar toLowerCase() porque ya validamos que es string no vacío
+        // Ahora es seguro usar toLowerCase() porque ya validamos que es string no vacÃ­o
         const regionNormalized = regionDespacho.toLowerCase().trim();
         
         if (regionNormalized === "santiago") {
             clientData.data['region'] = "RM";
         } else if (regionNormalized === "ohiggins" || regionNormalized === "o'higgins") {
             clientData.data['region'] = "VI";
-        } else if (regionNormalized === "valparaíso" || regionNormalized === "valparaiso") {
+        } else if (regionNormalized === "valparaÃ­so" || regionNormalized === "valparaiso") {
             clientData.data['region'] = "V";
         } else {
             clientData.data['region'] = "";
@@ -948,10 +1140,9 @@ async function readEmailBodyFromGmail(req, res) {
 
         const headers = headersToMap(message.data?.payload?.headers || []);
         const sender = extractEmailAddress(headers.From || '').toLowerCase();
-        const keyLogisticsSender = 'fax@keylogistics.cl';
         const allowedSenders = new Set([
-            'compras.marketds@pedidosya.com',
-            keyLogisticsSender
+            PEDIDOS_YA_SENDER,
+            KEY_LOGISTICS_SENDER
         ]);
 
         if (!allowedSenders.has(sender)) {
@@ -969,7 +1160,7 @@ async function readEmailBodyFromGmail(req, res) {
             ? new Date(Number(message.data.internalDate)).toISOString()
             : (headers.Date || '');
 
-        if (sender === keyLogisticsSender) {
+        if (sender === KEY_LOGISTICS_SENDER) {
             const pdfAttachments = findPdfAttachments(message.data?.payload);
             if (pdfAttachments.length === 0) {
                 return res.status(400).json({
@@ -1226,8 +1417,8 @@ function calculateSimilarity(str1, str2) {
 
 async function integrateWithChatGPT(addresses, targetAddress) {
 
-    const prompt = `Busca dentro de este arreglo ${JSON.stringify(addresses)} la mejor coincidencia para la dirección "${targetAddress}".
-    En caso de encontrar una coincidencia, devolver un array JSON con el objeto que contenga la dirección agregando "match": true.
+    const prompt = `Busca dentro de este arreglo ${JSON.stringify(addresses)} la mejor coincidencia para la direcciÃ³n "${targetAddress}".
+    En caso de encontrar una coincidencia, devolver un array JSON con el objeto que contenga la direcciÃ³n agregando "match": true.
     En caso de no encontrar coincidencias, devolver un array vacio. En caso de tener coincidencias, devolver solo un elemento.
     [no prose] [Output only JSON]`;
 
@@ -1318,7 +1509,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
                             data: first,
                             length: results.length,
                             address: false,
-                            message: "Cliente no encontrado en base de clientes por falta de dirección",
+                            message: "Cliente no encontrado en base de clientes por falta de direcciÃ³n",
                             boxPriceIsEqual: false
                         });
                         return;
@@ -1330,7 +1521,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
                             data: results[0],
                             length: results.length,
                             address: true,
-                            message: "No se puede encontrar coincidencias por falta de dirección",
+                            message: "No se puede encontrar coincidencias por falta de direcciÃ³n",
                             boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
                         });
                     }
@@ -1401,3 +1592,6 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
 
 
 export { readCSV, readEmailBody, readEmailBodyFromGmail };
+
+
+

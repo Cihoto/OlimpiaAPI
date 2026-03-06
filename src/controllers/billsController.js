@@ -1,6 +1,223 @@
 import Bill from '../models/Bill.js';
-import fs from 'fs';
-import path from 'path';
+import {
+    FACTURADO_STATUS,
+    normalizeRut,
+    shouldNotifyInvoice,
+    buildInvoiceNotificationEmail,
+    sendNotificationEmail
+} from '../services/invoiceNotificationEmail.js';
+import {
+    findSentInvoiceNotification,
+    saveSentInvoiceNotification
+} from '../services/mongoInvoiceNotificationRegistry.js';
+
+function pickFirstDefinedValue(candidates) {
+    for (const value of candidates) {
+        if (value !== undefined && value !== null && value !== '') {
+            return value;
+        }
+    }
+    return null;
+}
+
+function resolveInvoiceStatus(defontanaResponse) {
+    if (!defontanaResponse) {
+        return FACTURADO_STATUS;
+    }
+
+    if (defontanaResponse.success === false || defontanaResponse.error) {
+        return 'error';
+    }
+
+    const statusCandidate = pickFirstDefinedValue([
+        defontanaResponse.status,
+        defontanaResponse.estado,
+        defontanaResponse.documentStatus,
+        defontanaResponse.saleStatus,
+        defontanaResponse?.data?.status,
+        defontanaResponse?.data?.estado
+    ]);
+
+    if (!statusCandidate) {
+        return FACTURADO_STATUS;
+    }
+
+    const normalizedStatus = String(statusCandidate).toLowerCase().trim();
+    if (
+        normalizedStatus.includes('factur') ||
+        normalizedStatus.includes('issued') ||
+        normalizedStatus.includes('emitid') ||
+        normalizedStatus === 'ok' ||
+        normalizedStatus === 'success'
+    ) {
+        return FACTURADO_STATUS;
+    }
+
+    if (defontanaResponse.success === true) {
+        return FACTURADO_STATUS;
+    }
+
+    return normalizedStatus;
+}
+
+function resolveInvoiceId({ requestBody, billJson, defontanaResponse }) {
+    const invoiceId = pickFirstDefinedValue([
+        defontanaResponse?.invoiceId,
+        defontanaResponse?.InvoiceId,
+        defontanaResponse?.id,
+        defontanaResponse?.Id,
+        defontanaResponse?.saleId,
+        defontanaResponse?.SaleID,
+        defontanaResponse?.externalDocumentID,
+        defontanaResponse?.externalDocumentId,
+        defontanaResponse?.data?.invoiceId,
+        defontanaResponse?.data?.id,
+        defontanaResponse?.data?.externalDocumentID,
+        billJson?.externalDocumentID,
+        requestBody?.externalDocumentID,
+        requestBody?.invoiceId
+    ]);
+
+    return invoiceId ? String(invoiceId) : null;
+}
+
+function resolveInvoiceFolio({ requestBody, billJson, defontanaResponse }) {
+    const folio = pickFirstDefinedValue([
+        defontanaResponse?.folio,
+        defontanaResponse?.Folio,
+        defontanaResponse?.data?.folio,
+        billJson?.firstFolio,
+        requestBody?.firstFolio
+    ]);
+
+    return folio ?? null;
+}
+
+function resolveInvoiceAmount({ requestBody, billJson, defontanaResponse }) {
+    const amount = pickFirstDefinedValue([
+        defontanaResponse?.total,
+        defontanaResponse?.Total,
+        defontanaResponse?.amount,
+        defontanaResponse?.monto,
+        defontanaResponse?.data?.total,
+        defontanaResponse?.data?.amount,
+        requestBody?.Total,
+        requestBody?.Monto
+    ]);
+
+    if (amount !== null) {
+        return amount;
+    }
+
+    if (Array.isArray(billJson?.details)) {
+        const total = billJson.details.reduce((acc, item) => {
+            const count = Number(item?.count || 0);
+            const price = Number(item?.price || 0);
+            return acc + (Number.isFinite(count) && Number.isFinite(price) ? count * price : 0);
+        }, 0);
+        return total;
+    }
+
+    return null;
+}
+
+function resolveRazonSocial({ requestBody, rutCliente, defontanaResponse }) {
+    const razonSocial = pickFirstDefinedValue([
+        requestBody?.Razon_social,
+        requestBody?.razonSocial,
+        requestBody?.razon_social,
+        requestBody?.clientName,
+        defontanaResponse?.razonSocial,
+        defontanaResponse?.clientName,
+        defontanaResponse?.data?.razonSocial,
+        defontanaResponse?.data?.clientName
+    ]);
+
+    if (razonSocial) {
+        return razonSocial;
+    }
+
+    if (normalizeRut(rutCliente) === normalizeRut('96.930.440-6')) {
+        return 'KEYLOGISTICS CHILE S A';
+    }
+
+    return 'Sin razon social';
+}
+
+async function maybeSendInvoiceNotification({ requestBody, billJson, defontanaResponse }) {
+    const status = resolveInvoiceStatus(defontanaResponse);
+    const rutCliente = pickFirstDefinedValue([
+        requestBody?.clientFile,
+        billJson?.clientFile,
+        requestBody?.Rut,
+        requestBody?.rut
+    ]);
+
+    if (!shouldNotifyInvoice({ rut: rutCliente, status })) {
+        return {
+            attempted: false,
+            sent: false,
+            duplicate: false,
+            status,
+            reason: 'skip_rules'
+        };
+    }
+
+    const invoiceId = resolveInvoiceId({ requestBody, billJson, defontanaResponse });
+    if (!invoiceId) {
+        return {
+            attempted: false,
+            sent: false,
+            duplicate: false,
+            status,
+            reason: 'missing_invoice_id'
+        };
+    }
+
+    const existingNotification = await findSentInvoiceNotification({ invoiceId, status: FACTURADO_STATUS });
+    if (existingNotification) {
+        return {
+            attempted: true,
+            sent: false,
+            duplicate: true,
+            status: FACTURADO_STATUS,
+            invoiceId,
+            messageId: existingNotification.messageId || null
+        };
+    }
+
+    const razonSocial = resolveRazonSocial({ requestBody, rutCliente, defontanaResponse });
+    const folio = resolveInvoiceFolio({ requestBody, billJson, defontanaResponse });
+    const monto = resolveInvoiceAmount({ requestBody, billJson, defontanaResponse });
+    const fechaFacturacion = new Date().toISOString();
+    const { subject, text } = buildInvoiceNotificationEmail({
+        razonSocial,
+        rut: rutCliente,
+        folio,
+        monto,
+        fechaFacturacion,
+        invoiceId
+    });
+
+    const emailResult = await sendNotificationEmail({ subject, text });
+    const saveResult = await saveSentInvoiceNotification({
+        invoiceId,
+        rutCliente,
+        messageId: emailResult.messageId,
+        status: FACTURADO_STATUS,
+        fromEmail: emailResult.fromEmail,
+        recipientEmail: emailResult.recipientEmail
+    });
+
+    return {
+        attempted: true,
+        sent: saveResult.inserted === true,
+        duplicate: saveResult.duplicate === true,
+        status: FACTURADO_STATUS,
+        invoiceId,
+        ...emailResult
+    };
+}
 
 async function createBill(req, res) {
     if (!req.apiKey) {
@@ -78,108 +295,137 @@ async function createBill(req, res) {
 
         bill.validate();
         const BILLJSON = await bill.toJSON();
-        const filePath = path.resolve('./src/controllers/bills.json');
 
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("+++++++++++++++++++++++JSON DE DOUCMENTO PARA DEFONTANA+++++++++++++++++++++++");
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("BILLJSON", BILLJSON);
-        
-        //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
-        let prodQtyToAdd = 0;
-        BILLJSON.details.forEach(item => {
-            console.log("item.count", item);
-            prodQtyToAdd += item.count;
-        });
 
-        console.log("prodQtyToAdd", prodQtyToAdd);
+        let createBillDefontanaResponse = null;
 
-        if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
-            console.log("Agregando costo de despacho segun region:", body.region);
-            if (body.region === "RM") {
-                BILLJSON.details.push({
-                    "type": "A",
-                    "isExempt": false,
-                    "code": "70724043633538",
-                    "count": 1,
-                    "productName": "DESPACHO RM",
-                    "productNameBarCode": "",
-                    "price": 5000,
-                    "discount": {
-                        "type": 0,
-                        "value": 0
-                    },
-                    "unit": "UN",
-                    "analysis": {
-                        "accountNumber": "3110101001",
-                        "businessCenter": "EMPNEGVTAVTA000",
-                        "classifier01": "",
-                        "classifier02": ""
-                    },
-                    "useBatch": false,
-                    "batchInfo": []
-                });
-            }
-
-            if (bill.region === "V" || bill.region === "VI") {
-                BILLJSON.details.push({
-                    "type": "A",
-                    "isExempt": false,
-                    "code": "70724043633553",
-                    "count": 1,
-                    "productName": "DESPACHO V y VI",
-                    "productNameBarCode": "",
-                    "price": 10000,
-                    "discount": {
-                        "type": 0,
-                        "value": 0
-                    },
-                    "unit": "UN",
-                    "analysis": {
-                        "accountNumber": "3110101001",
-                        "businessCenter": "EMPNEGVTAVTA000",
-                        "classifier01": "",
-                        "classifier02": ""
-                    },
-                    "useBatch": false,
-                    "batchInfo": []
-                });
-            }
+        let notificationEmail;
+        try {
+            notificationEmail = await maybeSendInvoiceNotification({
+                requestBody: body,
+                billJson: BILLJSON,
+                defontanaResponse: createBillDefontanaResponse
+            });
+        } catch (error) {
+            console.error('Error sending invoice notification email:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'No se pudo enviar correo de notificacion',
+                details: error.message || String(error)
+            });
         }
 
-        let existingBills = [];
-        if (fs.existsSync(filePath)) {
-            const fileContent = fs.readFileSync(filePath, 'utf-8');
-            existingBills = JSON.parse(fileContent);
-        }
-
-        existingBills.push(BILLJSON);
-
-        fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
-
-        console.log(BILLJSON);
-
-        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-        console.log("saveSaleURL", saveSaleURL);
-        const createBillDefontana = await fetch(saveSaleURL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${req.apiKey}`
-            },
-            body: JSON.stringify(BILLJSON)
-        });
-
-        const createBillDefontanaResponse = await createBillDefontana.json();
-        console.log("createBillDefontanaResponse", createBillDefontanaResponse);
-
-        res.status(200).json({
-            createBillDefontanaResponse,
+        const responsePayload = {
             success: true,
-            data: BILLJSON
-        });
+            data: BILLJSON,
+            notificationEmail
+        };
 
-        return;
+        if (createBillDefontanaResponse) {
+            responsePayload.createBillDefontanaResponse = createBillDefontanaResponse;
+        }
+
+        return res.status(200).json(responsePayload);
+        
+        // //Agregar producto a BILLJSON.details en caso de que solo se compre una caja de un solo producto
+        // let prodQtyToAdd = 0;
+        // BILLJSON.details.forEach(item => {
+        //     console.log("item.count", item);
+        //     prodQtyToAdd += item.count;
+        // });
+
+        // console.log("prodQtyToAdd", prodQtyToAdd);
+
+        // if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
+        //     console.log("Agregando costo de despacho segun region:", body.region);
+        //     if (body.region === "RM") {
+        //         BILLJSON.details.push({
+        //             "type": "A",
+        //             "isExempt": false,
+        //             "code": "70724043633538",
+        //             "count": 1,
+        //             "productName": "DESPACHO RM",
+        //             "productNameBarCode": "",
+        //             "price": 5000,
+        //             "discount": {
+        //                 "type": 0,
+        //                 "value": 0
+        //             },
+        //             "unit": "UN",
+        //             "analysis": {
+        //                 "accountNumber": "3110101001",
+        //                 "businessCenter": "EMPNEGVTAVTA000",
+        //                 "classifier01": "",
+        //                 "classifier02": ""
+        //             },
+        //             "useBatch": false,
+        //             "batchInfo": []
+        //         });
+        //     }
+
+        //     if (bill.region === "V" || bill.region === "VI") {
+        //         BILLJSON.details.push({
+        //             "type": "A",
+        //             "isExempt": false,
+        //             "code": "70724043633553",
+        //             "count": 1,
+        //             "productName": "DESPACHO V y VI",
+        //             "productNameBarCode": "",
+        //             "price": 10000,
+        //             "discount": {
+        //                 "type": 0,
+        //                 "value": 0
+        //             },
+        //             "unit": "UN",
+        //             "analysis": {
+        //                 "accountNumber": "3110101001",
+        //                 "businessCenter": "EMPNEGVTAVTA000",
+        //                 "classifier01": "",
+        //                 "classifier02": ""
+        //             },
+        //             "useBatch": false,
+        //             "batchInfo": []
+        //         });
+        //     }
+        // }
+
+        // let existingBills = [];
+        // if (fs.existsSync(filePath)) {
+        //     const fileContent = fs.readFileSync(filePath, 'utf-8');
+        //     existingBills = JSON.parse(fileContent);
+        // }
+
+        // existingBills.push(BILLJSON);
+
+        // fs.writeFileSync(filePath, JSON.stringify(existingBills, null, 2), 'utf-8');
+
+        // console.log(BILLJSON);
+
+        // const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
+        // console.log("saveSaleURL", saveSaleURL);
+        // const createBillDefontana = await fetch(saveSaleURL, {
+        //     method: 'POST',
+        //     headers: {
+        //         'Content-Type': 'application/json',
+        //         Authorization: `Bearer ${req.apiKey}`
+        //     },
+        //     body: JSON.stringify(BILLJSON)
+        // });
+
+        // createBillDefontanaResponse = await createBillDefontana.json();
+        // console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+
+        // res.status(200).json({
+        //     createBillDefontanaResponse,
+        //     success: true,
+        //     data: BILLJSON
+        // });
+
+        // return;
 
         // const checkIssuedBillURL = `https://replapi.defontana.com/api/Sale/GetSaleByExternalDocumentID?externalDocumentID=1101997304`
         // const checkIssuedBill = await fetch(checkIssuedBillURL,{
