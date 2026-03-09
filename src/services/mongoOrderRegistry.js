@@ -25,6 +25,10 @@ async function getCollection() {
 
     if (!indexesReady) {
         await collection.createIndex({ clientId: 1, ocNumber: 1 }, { unique: true });
+        await collection.createIndex(
+            { sender: 1, ocNumber: 1 },
+            { unique: true, partialFilterExpression: { source: 'rappi_turbo' } }
+        );
         indexesReady = true;
     }
 
@@ -72,4 +76,49 @@ async function insertProcessedKeyLogisticsOrder({
     return { inserted: true };
 }
 
-export { findProcessedKeyLogisticsOrder, insertProcessedKeyLogisticsOrder };
+async function findProcessedSenderOrder({ sender, ocNumber, source = 'rappi_turbo' }) {
+    if (!sender || !ocNumber) {
+        return null;
+    }
+    const collection = await getCollection();
+    return collection.findOne({ sender, ocNumber, source });
+}
+
+async function insertProcessedSenderOrder({
+    sender,
+    ocNumber,
+    messageId,
+    emailDate,
+    attachmentFilename,
+    quantities,
+    metadata,
+    source = 'rappi_turbo'
+}) {
+    if (!sender || !ocNumber) {
+        return { skipped: true, reason: 'missing_sender_or_oc' };
+    }
+
+    const collection = await getCollection();
+    const doc = {
+        sender,
+        ocNumber,
+        messageId,
+        emailDate,
+        attachmentFilename,
+        quantities,
+        metadata,
+        source,
+        status: 'success',
+        createdAt: new Date()
+    };
+
+    await collection.insertOne(doc);
+    return { inserted: true };
+}
+
+export {
+    findProcessedKeyLogisticsOrder,
+    insertProcessedKeyLogisticsOrder,
+    findProcessedSenderOrder,
+    insertProcessedSenderOrder
+};

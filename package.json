@@ -8,7 +8,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "delivery:visibility": "node src/tools/deliveryVisibilityReport.js"
+    "delivery:visibility": "node src/tools/deliveryVisibilityReport.js",
+    "mongo:clear-rappi-turbo": "node src/tools/clearRappiTurboOrders.js"
   },
   "author": "LeCott",
   "license": "ISC",

@@ -6,6 +6,7 @@ import moment from 'moment';
 import XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
 import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
+import findRappiDeliveryDayByComuna from '../utils/findRappiDeliveryDate.js';
 import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 import {
     analyzeOrderEmail,
@@ -13,9 +14,12 @@ import {
     extractPedidosYaOrderNumber
 } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
+import { parseRappiTurboOrderText } from '../services/rappiTurboOrderParser.js';
 import {
     findProcessedKeyLogisticsOrder,
-    insertProcessedKeyLogisticsOrder
+    insertProcessedKeyLogisticsOrder,
+    findProcessedSenderOrder,
+    insertProcessedSenderOrder
 } from '../services/mongoOrderRegistry.js';
 import {
     buildGmailClient,
@@ -31,6 +35,7 @@ const KEY_LOGISTICS_BLOCKED_RUTS = new Set(['77.419.327-8', '96.930.440-6']);
 const KEY_LOGISTICS_FIXED_RUT = '96.930.440-6';
 const KEY_LOGISTICS_SENDER = 'fax@keylogistics.cl';
 const PEDIDOS_YA_SENDER = 'compras.marketds@pedidosya.com';
+const RAPPI_TURBO_SENDER = 'tomas.bravo@rappi.com';
 
 /**
  * KeyLogistics master data for billing/shipping resolution.
@@ -406,6 +411,7 @@ async function readEmailBody(req, res) {
             emailDate,
             source,
             keyLogistics,
+            rappiTurbo,
             sender,
             attachmentFilename
         } = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
@@ -736,6 +742,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         console.log({ validJson });
 
         const keyLogisticsData = keyLogistics && typeof keyLogistics === 'object' ? keyLogistics : null;
+        const rappiTurboData = rappiTurbo && typeof rappiTurbo === 'object' ? rappiTurbo : null;
         if (keyLogisticsData?.rut) {
             validJson.Rut = keyLogisticsData.rut;
         }
@@ -758,9 +765,51 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             }
         }
 
+        if (rappiTurboData?.rut) {
+            validJson.Rut = rappiTurboData.rut;
+        }
+        if (rappiTurboData?.ocNumber) {
+            validJson.Orden_de_Compra = rappiTurboData.ocNumber;
+        }
+        if (rappiTurboData?.dispatchAddress) {
+            validJson.Direccion_despacho = rappiTurboData.dispatchAddress;
+            const extractedAddresses = Array.isArray(validJson.Direcciones_encontradas)
+                ? validJson.Direcciones_encontradas
+                : [];
+            const parserAddresses = Array.isArray(rappiTurboData.direccionesEncontradas)
+                ? rappiTurboData.direccionesEncontradas
+                : [];
+            validJson.Direcciones_encontradas = Array.from(
+                new Set([rappiTurboData.dispatchAddress, ...extractedAddresses, ...parserAddresses].filter(Boolean))
+            );
+        }
+        if (rappiTurboData?.totals) {
+            if (Number.isFinite(rappiTurboData.totals.subtotal)) {
+                validJson.Monto = rappiTurboData.totals.subtotal;
+            }
+            if (Number.isFinite(rappiTurboData.totals.iva)) {
+                validJson.Iva = rappiTurboData.totals.iva;
+            }
+            if (Number.isFinite(rappiTurboData.totals.total)) {
+                validJson.Total = rappiTurboData.totals.total;
+            }
+        }
+        if (rappiTurboData?.priceTotals) {
+            validJson.Pedido_PrecioTotal_Pink = rappiTurboData.priceTotals.Pedido_PrecioTotal_Pink || 0;
+            validJson.Pedido_PrecioTotal_Amargo = rappiTurboData.priceTotals.Pedido_PrecioTotal_Amargo || 0;
+            validJson.Pedido_PrecioTotal_Leche = rappiTurboData.priceTotals.Pedido_PrecioTotal_Leche || 0;
+            validJson.Pedido_PrecioTotal_Free = rappiTurboData.priceTotals.Pedido_PrecioTotal_Free || 0;
+            validJson.Pedido_PrecioTotal_Pink_90g = rappiTurboData.priceTotals.Pedido_PrecioTotal_Pink_90g || 0;
+            validJson.Pedido_PrecioTotal_Amargo_90g = rappiTurboData.priceTotals.Pedido_PrecioTotal_Amargo_90g || 0;
+            validJson.Pedido_PrecioTotal_Leche_90g = rappiTurboData.priceTotals.Pedido_PrecioTotal_Leche_90g || 0;
+        }
+
         const isKeyLogisticsGmail =
             source === 'gmail' &&
             String(sender || '').toLowerCase() === KEY_LOGISTICS_SENDER;
+        const isRappiTurboGmail =
+            source === 'gmail' &&
+            String(sender || '').toLowerCase() === RAPPI_TURBO_SENDER;
         const keyLogisticsFixedClientData =
             isKeyLogisticsGmail && keyLogisticsData?.clientId
                 ? buildKeyLogisticsClientData(
@@ -774,6 +823,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             validJson.Rut = KEY_LOGISTICS_FIXED_RUT;
         }
 
+        const injectedQuantities = keyLogisticsData?.quantities || rappiTurboData?.quantities;
         let rutIsFound = false
         if (!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
             const foundSpecialCustomer = foundSpecialCustomers(validJson.Razon_social);
@@ -785,8 +835,8 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             rutIsFound = true
         }
 
-        const analyzeOrderEmaiResponse = keyLogisticsData?.quantities
-            ? { ...EMPTY_ORDER_QUANTITIES, ...keyLogisticsData.quantities }
+        const analyzeOrderEmaiResponse = injectedQuantities
+            ? { ...EMPTY_ORDER_QUANTITIES, ...injectedQuantities }
             : (source === 'gmail'
                 ? await analyzeOrderEmailFromGmail(sanitizedEmailBody)
                 : await analyzeOrderEmail(sanitizedEmailBody));
@@ -902,7 +952,14 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         
         for (const direccion of direccionesAProbar) {
             console.log(`Probando direcciÃ³n: ${direccion}`);
-            const resultado = await readCSV_private(validJson.Rut, direccion, validJson.precio_caja, validJson.isDelivery, emailDate);
+            const resultado = await readCSV_private(
+                validJson.Rut,
+                direccion,
+                validJson.precio_caja,
+                validJson.isDelivery,
+                emailDate,
+                { useRappiDeliverySchedule: isRappiTurboGmail }
+            );
             
             // Verificar si encontramos datos vÃ¡lidos (no array vacÃ­o y tiene Región Despacho)
             const regionDespachoTemp = resultado?.data?.['Región Despacho'];
@@ -923,7 +980,14 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         
         // Si no encontramos nada con ninguna direcciÃ³n, usar el resultado del Ãºltimo intento o hacer uno con la principal
         if (!clientData) {
-            clientData = await readCSV_private(validJson.Rut, validJson.Direccion_despacho, validJson.precio_caja, validJson.isDelivery, emailDate);
+            clientData = await readCSV_private(
+                validJson.Rut,
+                validJson.Direccion_despacho,
+                validJson.precio_caja,
+                validJson.isDelivery,
+                emailDate,
+                { useRappiDeliverySchedule: isRappiTurboGmail }
+            );
         }
         
         console.log("clientData", clientData);
@@ -1142,7 +1206,8 @@ async function readEmailBodyFromGmail(req, res) {
         const sender = extractEmailAddress(headers.From || '').toLowerCase();
         const allowedSenders = new Set([
             PEDIDOS_YA_SENDER,
-            KEY_LOGISTICS_SENDER
+            KEY_LOGISTICS_SENDER,
+            RAPPI_TURBO_SENDER
         ]);
 
         if (!allowedSenders.has(sender)) {
@@ -1303,6 +1368,150 @@ async function readEmailBodyFromGmail(req, res) {
             });
         }
 
+        if (sender === RAPPI_TURBO_SENDER) {
+            const pdfAttachments = findPdfAttachments(message.data?.payload);
+            if (pdfAttachments.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'No se encontraron adjuntos PDF',
+                    messageId
+                });
+            }
+
+            const results = [];
+            const seenOcNumbers = new Set();
+
+            for (const attachment of pdfAttachments) {
+                try {
+                    const attachmentResponse = await gmail.users.messages.attachments.get({
+                        userId,
+                        messageId,
+                        id: attachment.attachmentId
+                    });
+
+                    const buffer = decodeBase64Url(attachmentResponse.data?.data);
+                    const pdfText = await pdfBufferToText(buffer);
+                    const rappiTurboData = parseRappiTurboOrderText(pdfText);
+                    const savedFiles = await saveTempFiles(messageId, attachment.filename, buffer, pdfText);
+                    const ocNumber = rappiTurboData?.ocNumber || null;
+
+                    if (ocNumber && seenOcNumbers.has(ocNumber)) {
+                        results.push({
+                            filename: attachment.filename,
+                            mimeType: attachment.mimeType,
+                            savedFiles,
+                            rappiTurbo: rappiTurboData,
+                            status: 409,
+                            response: {
+                                success: false,
+                                error: 'Orden de compra duplicada en el mismo correo',
+                                duplicate: true,
+                                duplicateInMessage: true,
+                                ocNumber
+                            }
+                        });
+                        continue;
+                    }
+
+                    if (ocNumber) {
+                        seenOcNumbers.add(ocNumber);
+                        try {
+                            const existingOrder = await findProcessedSenderOrder({
+                                sender,
+                                ocNumber,
+                                source: 'rappi_turbo'
+                            });
+                            if (existingOrder) {
+                                results.push({
+                                    filename: attachment.filename,
+                                    mimeType: attachment.mimeType,
+                                    savedFiles,
+                                    rappiTurbo: rappiTurboData,
+                                    status: 409,
+                                    response: {
+                                        success: false,
+                                        error: 'Orden de compra duplicada',
+                                        duplicate: true,
+                                        ocNumber
+                                    }
+                                });
+                                continue;
+                            }
+                        } catch (error) {
+                            // Continue processing even if duplicate check cannot be validated.
+                        }
+                    }
+
+                    const payload = {
+                        emailBody,
+                        emailSubject,
+                        emailAttached: pdfText,
+                        emailDate,
+                        source: 'gmail',
+                        sender,
+                        attachmentFilename: attachment.filename,
+                        rappiTurbo: rappiTurboData
+                    };
+
+                    const response = await runReadEmailBodyPayload(payload);
+
+                    if (
+                        ocNumber &&
+                        response.status === 200 &&
+                        response.body?.success !== false
+                    ) {
+                        try {
+                            await insertProcessedSenderOrder({
+                                sender,
+                                ocNumber,
+                                messageId,
+                                emailDate,
+                                attachmentFilename: attachment.filename,
+                                quantities: rappiTurboData?.quantities,
+                                metadata: {
+                                    rut: rappiTurboData?.rut || null,
+                                    storeName: rappiTurboData?.storeName || null,
+                                    dispatchAddress: rappiTurboData?.dispatchAddress || null,
+                                    totals: rappiTurboData?.totals || null
+                                },
+                                source: 'rappi_turbo'
+                            });
+                        } catch (error) {
+                            // Continue without blocking the response; duplicates are handled by unique index.
+                        }
+                    }
+
+                    results.push({
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        savedFiles,
+                        rappiTurbo: rappiTurboData,
+                        status: response.status,
+                        response: response.body
+                    });
+                } catch (error) {
+                    results.push({
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        status: 500,
+                        response: { success: false, error: error.message }
+                    });
+                }
+            }
+
+            const success = results.every((result) => result.status >= 200 && result.status < 300);
+            const allDuplicates = results.length > 0 && results.every((result) => result.status === 409);
+            return res.status(allDuplicates ? 409 : 200).json({
+                success,
+                messageId,
+                sender,
+                subject: emailSubject,
+                emailDate,
+                attachments: pdfAttachments.length,
+                results
+            });
+        }
+
         const excelAttachments = findExcelAttachments(message.data?.payload);
         if (excelAttachments.length === 0) {
             return res.status(400).json({
@@ -1413,6 +1622,19 @@ function calculateSimilarity(str1, str2) {
     return commonLength / Math.max(str1.length, str2.length);
 }
 
+function getRegionFromClientRecord(record) {
+    if (!record || typeof record !== 'object') {
+        return '';
+    }
+    return (
+        record['Región Despacho'] ||
+        record['RegiÃ³n Despacho'] ||
+        record['RegiÃƒÂ³n Despacho'] ||
+        record.region ||
+        ''
+    );
+}
+
 //integracion con chat gpt
 
 async function integrateWithChatGPT(addresses, targetAddress) {
@@ -1437,7 +1659,8 @@ async function integrateWithChatGPT(addresses, targetAddress) {
     }
 }
 
-async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, emailDate) {
+async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, emailDate, options = {}) {
+    const useRappiDeliverySchedule = Boolean(options?.useRappiDeliverySchedule);
     const results = [];
     console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
     console.log(`address to search: ${address}`); // Log the address to search
@@ -1481,7 +1704,13 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
                         console.log("results[0]", results[0]['Comuna Despacho'], emailDate);
 
 
-                        const deliveryDay = findDeliveryDayByComuna(results[0]['Comuna Despacho'], emailDate);
+                        const deliveryDay = useRappiDeliverySchedule
+                            ? findRappiDeliveryDayByComuna(
+                                results[0]['Comuna Despacho'],
+                                emailDate,
+                                getRegionFromClientRecord(results[0])
+                            )
+                            : findDeliveryDayByComuna(results[0]['Comuna Despacho'], emailDate);
                         if (deliveryDay != null) {
                             results[0]['deliveryDay'] = `${deliveryDay}`;
                         } else {
@@ -1566,7 +1795,13 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
 
                     console.log("Se encontro una coincidencia");
                     console.log("found", found['Comuna Despacho'], emailDate);
-                    const deliveryDay = findDeliveryDayByComuna(found['Comuna Despacho'], emailDate);
+                    const deliveryDay = useRappiDeliverySchedule
+                        ? findRappiDeliveryDayByComuna(
+                            found['Comuna Despacho'],
+                            emailDate,
+                            getRegionFromClientRecord(found)
+                        )
+                        : findDeliveryDayByComuna(found['Comuna Despacho'], emailDate);
 
                     if (deliveryDay != null) {
                         found['deliveryDay'] = `${deliveryDay}`;
@@ -1592,6 +1827,7 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
 
 
 export { readCSV, readEmailBody, readEmailBodyFromGmail };
+
 
 
 
