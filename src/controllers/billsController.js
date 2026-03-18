@@ -442,24 +442,24 @@ async function createBill(req, res) {
         console.log(BILLJSON);
 
         // Comentar fetch a Defontana para pruebas sin consumir cupo y simular respuesta exitosa de facturación
-        // const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-        // console.log("saveSaleURL", saveSaleURL);
-        // const createBillDefontana = await fetch(saveSaleURL, {
-        //     method: 'POST',
-        //     headers: {
-        //         'Content-Type': 'application/json',
-        //         Authorization: `Bearer ${req.apiKey}`
-        //     },
-        //     body: JSON.stringify(BILLJSON)
-        // });
+        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
+        console.log("saveSaleURL", saveSaleURL);
+        const createBillDefontana = await fetch(saveSaleURL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${req.apiKey}`
+            },
+            body: JSON.stringify(BILLJSON)
+        });
 
-        // createBillDefontanaResponse = await createBillDefontana.json();
-        // console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+        createBillDefontanaResponse = await createBillDefontana.json();
+        console.log("createBillDefontanaResponse", createBillDefontanaResponse);
 
-        // const invoiceStatus = resolveInvoiceStatus(createBillDefontanaResponse);
+        const invoiceStatus = resolveInvoiceStatus(createBillDefontanaResponse);
 
         // Por ahora, simular que la factura se emite correctamente en Defontana para probar flujo de reservas de entrega y notificaciones sin consumir cupo real en Defontana.
-        const invoiceStatus = FACTURADO_STATUS;
+        // const invoiceStatus = FACTURADO_STATUS;
         // TODO: Manejar estado PENDING_VERIFY sin consumir cupo cuando Defontana quede incierto.
         if (deliveryReservationInBilling?.reservationId) {
             if (invoiceStatus === FACTURADO_STATUS) {
