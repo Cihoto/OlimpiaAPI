@@ -10,6 +10,11 @@ import {
     findSentInvoiceNotification,
     saveSentInvoiceNotification
 } from '../services/mongoInvoiceNotificationRegistry.js';
+import {
+    prepareDeliveryReservationForBilling,
+    markDeliveryReservationAsCommitted,
+    markDeliveryReservationAsFailed
+} from '../services/deliveryCapacityService.js';
 
 function pickFirstDefinedValue(candidates) {
     for (const value of candidates) {
@@ -226,6 +231,10 @@ async function createBill(req, res) {
         res.status(401).json({ code: 401, error: 'Error al autenticar' });
         return;
     }
+    let deliveryReservationInBilling = null;
+    let deliveryReservationStatusPersisted = false;
+    let deliveryDayOverwrittenByReservation = false;
+
     try {
         // const reqq = {
         //     body: {
@@ -272,6 +281,58 @@ async function createBill(req, res) {
         // FROM HERE
 
         const { body } = req;
+        let reservationReference = null;
+        if (body.reservationId !== undefined && body.reservationId !== null && body.reservationId !== '') {
+            reservationReference = String(body.reservationId).trim();
+        } else if (
+            body.deliveryReservation !== undefined &&
+            body.deliveryReservation !== null &&
+            body.deliveryReservation !== ''
+        ) {
+            if (typeof body.deliveryReservation === 'string') {
+                const trimmedReservationValue = body.deliveryReservation.trim();
+                if (trimmedReservationValue.startsWith('{')) {
+                    try {
+                        reservationReference = JSON.parse(trimmedReservationValue);
+                    } catch (error) {
+                        throw {
+                            code: 400,
+                            error: 'Bad request',
+                            message: 'deliveryReservation tiene formato invalido'
+                        };
+                    }
+                } else {
+                    reservationReference = trimmedReservationValue;
+                }
+            } else {
+                reservationReference = body.deliveryReservation;
+            }
+        }
+
+        if (reservationReference) {
+            const preparedReservation = await prepareDeliveryReservationForBilling({
+                deliveryReservation: reservationReference
+            });
+
+            deliveryReservationInBilling = preparedReservation?.deliveryReservation || null;
+            if (!deliveryReservationInBilling?.reservationId) {
+                throw {
+                    code: 400,
+                    error: 'Bad request',
+                    message: 'reservationId es requerido y debe existir en Mongo'
+                };
+            }
+
+            const reservedDeliveryDay = deliveryReservationInBilling?.assignedDeliveryDay || null;
+            if (
+                reservedDeliveryDay &&
+                String(body.deliveryDay || '') !== String(reservedDeliveryDay)
+            ) {
+                body.deliveryDay = reservedDeliveryDay;
+                deliveryDayOverwrittenByReservation = true;
+            }
+        }
+
         const bill = new Bill();
         bill.apiKey = req.apiKey
         bill.documentType = body.documentType;
@@ -380,20 +441,43 @@ async function createBill(req, res) {
 
         console.log(BILLJSON);
 
-        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-        console.log("saveSaleURL", saveSaleURL);
-        const createBillDefontana = await fetch(saveSaleURL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${req.apiKey}`
-            },
-            body: JSON.stringify(BILLJSON)
-        });
+        // Comentar fetch a Defontana para pruebas sin consumir cupo y simular respuesta exitosa de facturación
+        // const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
+        // console.log("saveSaleURL", saveSaleURL);
+        // const createBillDefontana = await fetch(saveSaleURL, {
+        //     method: 'POST',
+        //     headers: {
+        //         'Content-Type': 'application/json',
+        //         Authorization: `Bearer ${req.apiKey}`
+        //     },
+        //     body: JSON.stringify(BILLJSON)
+        // });
 
-        createBillDefontanaResponse = await createBillDefontana.json();
-        console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+        // createBillDefontanaResponse = await createBillDefontana.json();
+        // console.log("createBillDefontanaResponse", createBillDefontanaResponse);
 
+        // const invoiceStatus = resolveInvoiceStatus(createBillDefontanaResponse);
+
+        // Por ahora, simular que la factura se emite correctamente en Defontana para probar flujo de reservas de entrega y notificaciones sin consumir cupo real en Defontana.
+        const invoiceStatus = FACTURADO_STATUS;
+        // TODO: Manejar estado PENDING_VERIFY sin consumir cupo cuando Defontana quede incierto.
+        if (deliveryReservationInBilling?.reservationId) {
+            if (invoiceStatus === FACTURADO_STATUS) {
+                const committedReservation = await markDeliveryReservationAsCommitted({
+                    deliveryReservation: deliveryReservationInBilling,
+                    defontanaResponse: createBillDefontanaResponse
+                });
+                deliveryReservationInBilling = committedReservation?.deliveryReservation || deliveryReservationInBilling;
+            } else {
+                const failedReservation = await markDeliveryReservationAsFailed({
+                    deliveryReservation: deliveryReservationInBilling,
+                    reason: 'defontana_error',
+                    defontanaResponse: createBillDefontanaResponse
+                });
+                deliveryReservationInBilling = failedReservation?.deliveryReservation || deliveryReservationInBilling;
+            }
+            deliveryReservationStatusPersisted = true;
+        }
 
         let notificationEmail;
         try {
@@ -407,19 +491,22 @@ async function createBill(req, res) {
             return res.status(500).json({
                 success: false,
                 error: 'No se pudo enviar correo de notificacion',
-                details: error.message || String(error)
+                details: error.message || String(error),
+                deliveryReservation: deliveryReservationInBilling
             });
         }
 
         const responsePayload = {
             success: true,
             data: BILLJSON,
-            notificationEmail
+            notificationEmail,
+            deliveryReservation: deliveryReservationInBilling
         };
 
         if (createBillDefontanaResponse) {
             responsePayload.createBillDefontanaResponse = createBillDefontanaResponse;
         }
+        responsePayload.deliveryDayOverwrittenByReservation = deliveryDayOverwrittenByReservation;
 
         res.status(200).json(responsePayload);
 
@@ -446,14 +533,31 @@ async function createBill(req, res) {
 
         // console.log("mapped", mapped);
     } catch (error) {
+        if (deliveryReservationInBilling?.reservationId && !deliveryReservationStatusPersisted) {
+            try {
+                const failedReservation = await markDeliveryReservationAsFailed({
+                    deliveryReservation: deliveryReservationInBilling,
+                    reason: error?.message || 'create_bill_exception'
+                });
+                deliveryReservationInBilling = failedReservation?.deliveryReservation || deliveryReservationInBilling;
+            } catch (reservationError) {
+                console.error('Error updating delivery reservation after createBill failure:', reservationError);
+            }
+        }
+
         console.error('Error creating bill:', error);
         if (error.code && error.message) {
             res.status(error.code).json({
                 ...error,
-                success: false
+                success: false,
+                deliveryReservation: deliveryReservationInBilling
             });
         } else {
-            res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error' });
+            res.status(500).json({
+                errorCode: 5000,
+                errorMessage: 'Internal server error',
+                deliveryReservation: deliveryReservationInBilling
+            });
         }
     }
 }

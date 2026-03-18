@@ -15,6 +15,7 @@ import {
 } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
 import { parseRappiTurboOrderText } from '../services/rappiTurboOrderParser.js';
+import { createDeliveryReservationForAnalysis } from '../services/deliveryCapacityService.js';
 import {
     findProcessedKeyLogisticsOrder,
     insertProcessedKeyLogisticsOrder,
@@ -162,6 +163,44 @@ function buildKeyLogisticsClientData(clientId, emailDate, extractedBoxPrice) {
         boxPriceIsEqual: extractedBoxPrice == data['Precio Caja'],
         source: 'keylogistics_master_data'
     };
+}
+
+async function reserveRmDeliveryCapacity({ emailData, clientData, emailContext }) {
+    let reservationResult = null;
+    try {
+        reservationResult = await createDeliveryReservationForAnalysis({
+            emailData,
+            clientData,
+            emailContext
+        });
+    } catch (error) {
+        throw {
+            code: 500,
+            error: 'Error en reserva de despacho',
+            message: error?.message || 'No se pudo reservar capacidad de despacho'
+        };
+    }
+
+    if (!reservationResult || reservationResult.skipped || !reservationResult.deliveryReservation) {
+        return null;
+    }
+
+    return reservationResult.deliveryReservation;
+}
+
+function applyDeliveryReservationToMergedResponse(merged, deliveryReservation) {
+    if (!merged || !deliveryReservation) {
+        return;
+    }
+
+    const assignedDeliveryDay = deliveryReservation.assignedDeliveryDay || null;
+    if (!assignedDeliveryDay) {
+        return;
+    }
+
+    if (merged?.ClientData?.data) {
+        merged.ClientData.data.deliveryDay = assignedDeliveryDay;
+    }
 }
 
 // Normalize CSV record keys/values to expected canonical keys
@@ -922,7 +961,24 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                 "hasMatch": true
             };
 
-            res.status(200).json({ merged });
+            const deliveryReservation = await reserveRmDeliveryCapacity({
+                emailData: validJson,
+                clientData: keyLogisticsFixedClientData,
+                emailContext: {
+                    emailSubject,
+                    emailDate,
+                    sender,
+                    source,
+                    attachmentFilename
+                }
+            });
+
+            applyDeliveryReservationToMergedResponse(merged, deliveryReservation);
+
+            res.status(200).json({
+                merged,
+                deliveryReservation
+            });
             return;
         }
 
@@ -1068,11 +1124,39 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
 
         };
 
-        res.status(200).json({ merged });
+        const deliveryReservation = await reserveRmDeliveryCapacity({
+            emailData: validJson,
+            clientData,
+            emailContext: {
+                emailSubject,
+                emailDate,
+                sender,
+                source,
+                attachmentFilename
+            }
+        });
+
+        applyDeliveryReservationToMergedResponse(merged, deliveryReservation);
+
+        res.status(200).json({
+            merged,
+            deliveryReservation
+        });
         return;
 
     } catch (error) {
         console.log(error);
+
+        if (error?.code && error?.message) {
+            return res.status(error.code).json({
+                success: false,
+                error: error.error || 'Error en procesamiento de despacho',
+                details: error.message,
+                requestBody: req.body,
+                executionDate: moment().format('DD-MM-YYYY HH:mm:ss'),
+                OC_date: moment().format('DD-MM-YYYY')
+            });
+        }
 
         const response = {
             "Razon_social": "[null]  Razon_social",

@@ -77,7 +77,7 @@ function computeNextDeliveryDate(allowedDays, emailDate) {
     const emailDateHour = emailMoment.hour();
     const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
     const isFriday = emailDateDayIndex === 5;
-    const isAfterCutoff = emailDateHour >= 14;
+    const isAfterCutoff = emailDateHour >= 12;
     const isWeekendLikeBlock = (isFriday && isAfterCutoff) || isWeekend;
 
     const upcomingDeliveries = [];

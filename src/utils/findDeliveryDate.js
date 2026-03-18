@@ -3,8 +3,6 @@
 // moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
 // import moment from 'moment'; // Import moment.js for date manipulation
 
-
-
 import moment from 'moment-timezone'; // Import moment-timezone for timezone support
 import { isFileLike } from 'openai/uploads.mjs';
 // moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
@@ -36,7 +34,7 @@ const uniqueCommunities = [
     "MACUL",
     "CONCHALÍ",
     "PUDAHUEL"
-]
+];
 
 const deliveryDays = [
     {
@@ -196,7 +194,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         const emailDateHour = emailMoment.hour();
         const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
         const isFriday = emailDateDayIndex === 5;
-        const isAfterCutoff = emailDateHour >= 14;
+        const isAfterCutoff = emailDateHour >= 12;
         const isWeekendLikeBlock = (isFriday && isAfterCutoff) || isWeekend;
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
@@ -249,7 +247,7 @@ function DeliveryDaySelector(deliveryDayIndexes, i, emailDateFormatted, emailDat
         // break;
     }
 
-    if (emailDateHour >= 14) {
+    if (emailDateHour >= 12) {
         return moveForward(deliveryDayIndexes.length, i, 1)
     } else {
         // console.log({ emailDateHour })

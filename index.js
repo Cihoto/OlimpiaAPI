@@ -18,6 +18,7 @@ import cors from 'cors';
 import bannerRoutes from './src/routes/bannerRouter.js';
 import { fileURLToPath } from 'url';
 import moment from 'moment';
+import { startDeliveryCapacityCleanupCron } from './src/services/deliveryCapacityService.js';
 
 import findDeliveryDayByComuna from './src/utils/findDeliveryDate.js'; // Import the function
 // moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
@@ -199,6 +200,13 @@ app.use('/api/orders', orderRoutes);
 
 
 
+
+const deliveryCleanupIntervalMinutes = Number(process.env.DELIVERY_HOLD_CLEANUP_INTERVAL_MINUTES || 12);
+startDeliveryCapacityCleanupCron({
+  intervalMinutes: deliveryCleanupIntervalMinutes,
+  runOnStart: true,
+  logger: console
+});
 
 // Start server
 const PORT = process.env.PORT || 5000;
