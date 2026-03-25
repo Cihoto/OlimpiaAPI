@@ -1,11 +1,138 @@
-// const moment = require('moment'); // Import moment.js for date manipulation
-// require('moment-timezone'); // Import moment-timezone for timezone support
-// moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
-// import moment from 'moment'; // Import moment.js for date manipulation
-
 import moment from 'moment-timezone'; // Import moment-timezone for timezone support
-import { isFileLike } from 'openai/uploads.mjs';
 // moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
+
+const CHILE_TIMEZONE = 'America/Santiago';
+const RM_DELIVERY_CUTOFF_HOUR_RAW = Number.parseInt(
+    process.env.DELIVERY_RM_DISPATCH_CUTOFF_HOUR || '12',
+    10
+);
+const REGIONAL_DELIVERY_CUTOFF_HOUR_RAW = Number.parseInt(
+    process.env.DELIVERY_REGIONS_DISPATCH_CUTOFF_HOUR
+    || process.env.DELIVERY_DISPATCH_CUTOFF_HOUR
+    || '13',
+    10
+);
+
+function normalizeCutoffHour(value, fallback = 13) {
+    if (!Number.isFinite(value)) {
+        return fallback;
+    }
+    return Math.max(0, Math.min(23, Math.trunc(value)));
+}
+
+const RM_DELIVERY_CUTOFF_HOUR = normalizeCutoffHour(RM_DELIVERY_CUTOFF_HOUR_RAW, 12);
+const REGIONAL_DELIVERY_CUTOFF_HOUR = normalizeCutoffHour(REGIONAL_DELIVERY_CUTOFF_HOUR_RAW, 13);
+
+const REGION_V_ALIASES = new Set([
+    'v',
+    'quinta',
+    'quinta region',
+    'valparaiso',
+    'region de valparaiso'
+]);
+
+const REGION_VI_ALIASES = new Set([
+    'vi',
+    'sexta',
+    'sexta region',
+    "o'higgins",
+    'ohiggins',
+    "region del libertador general bernardo o'higgins",
+    'region del libertador general bernardo ohiggins'
+]);
+
+const REGIONAL_BIWEEKLY_SCHEDULES = Object.freeze({
+    V: Object.freeze({
+        anchorDate: '2026-03-04' // Wednesday
+    }),
+    VI: Object.freeze({
+        anchorDate: '2026-03-12' // Thursday
+    })
+});
+
+const COMUNA_REGION_SCHEDULE_OVERRIDES = new Map([
+    ['curacavi', 'V'],
+    ['buin', 'VI'],
+    ['linderos', 'VI']
+]);
+
+function normalizeText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function normalizeRegionCode(regionValue) {
+    const normalized = normalizeText(regionValue).replace(/\s+/g, ' ');
+    if (!normalized) {
+        return '';
+    }
+    if (REGION_V_ALIASES.has(normalized)) {
+        return 'V';
+    }
+    if (REGION_VI_ALIASES.has(normalized)) {
+        return 'VI';
+    }
+    return '';
+}
+
+function getEmailMoment(emailDate) {
+    const parsed = emailDate
+        ? moment.tz(emailDate, CHILE_TIMEZONE)
+        : moment.tz(CHILE_TIMEZONE);
+    if (parsed.isValid()) {
+        return parsed;
+    }
+    return moment.tz(CHILE_TIMEZONE);
+}
+
+function resolveRegionalScheduleCode(comunaToSearch, region) {
+    const normalizedComuna = normalizeText(comunaToSearch);
+    const comunaOverride = COMUNA_REGION_SCHEDULE_OVERRIDES.get(normalizedComuna);
+    if (comunaOverride) {
+        return comunaOverride;
+    }
+
+    const regionCode = normalizeRegionCode(region);
+    if (regionCode === 'V' || regionCode === 'VI') {
+        return regionCode;
+    }
+
+    return null;
+}
+
+function findNextBiweeklyRegionalDeliveryDay(scheduleCode, emailMoment) {
+    const schedule = REGIONAL_BIWEEKLY_SCHEDULES[scheduleCode];
+    if (!schedule) {
+        return null;
+    }
+
+    const anchorMoment = moment.tz(schedule.anchorDate, 'YYYY-MM-DD', CHILE_TIMEZONE).startOf('day');
+    if (!anchorMoment.isValid()) {
+        return null;
+    }
+
+    const orderDayStart = emailMoment.clone().startOf('day');
+    const isAfterCutoff = emailMoment.hour() >= REGIONAL_DELIVERY_CUTOFF_HOUR;
+
+    // Business rule: never same-day for region routes.
+    let candidate = anchorMoment.clone();
+    while (!candidate.isAfter(orderDayStart, 'day')) {
+        candidate.add(14, 'days');
+    }
+
+    // If order is after cut-off and next route is tomorrow, move to next cycle.
+    if (isAfterCutoff) {
+        const diffToCandidate = candidate.diff(orderDayStart, 'days');
+        if (diffToCandidate === 1) {
+            candidate.add(14, 'days');
+        }
+    }
+
+    return candidate.format('YYYY-MM-DD');
+}
 
 
 const uniqueCommunities = [
@@ -138,7 +265,7 @@ const deliveryDays = [
 ];
 
 function normalizeCommunityName(value) {
-    return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    return normalizeText(value);
 }
 
 function getDeliveryDayIndexesByComuna(comunaToSearch) {
@@ -157,7 +284,15 @@ function getAllDeliveryCommunities() {
     return [...uniqueCommunities];
 }
 
-function findDeliveryDayByComuna(comunaToSearch, emailDate) {
+function resolveDispatchCutoffHourByComuna(comunaToSearch, region = '') {
+    const regionalScheduleCode = resolveRegionalScheduleCode(comunaToSearch, region);
+    if (regionalScheduleCode) {
+        return REGIONAL_DELIVERY_CUTOFF_HOUR;
+    }
+    return RM_DELIVERY_CUTOFF_HOUR;
+}
+
+function findDeliveryDayByComuna(comunaToSearch, emailDate, region = '') {
 
     try {
         // const todayWeekDayIndex = moment().day(); // Obtiene el índice del día de la semana (0 para domingo, 1 para lunes, etc.)
@@ -169,6 +304,15 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
             return null; // Invalid input
         }
         console.log("comunaToSearch 2", comunaToSearch);
+
+        const emailMoment = getEmailMoment(emailDate);
+        const regionalScheduleCode = resolveRegionalScheduleCode(comunaToSearch, region);
+        if (regionalScheduleCode) {
+            const regionalDeliveryDay = findNextBiweeklyRegionalDeliveryDay(regionalScheduleCode, emailMoment);
+            if (regionalDeliveryDay) {
+                return regionalDeliveryDay;
+            }
+        }
 
 
         // Check if the comunaToSearch is in the list of unique communities
@@ -184,17 +328,14 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate) {
         // Find all indexes of the delivery days that match the comunaToSearch
         const deliveryDayIndexes = getDeliveryDayIndexesByComuna(comunaToSearch);
         console.log("deliveryDayIndexes", deliveryDayIndexes);
-        
-        let emailMoment = emailDate
-            ? moment.tz(emailDate, 'America/Santiago')
-            : moment.tz('America/Santiago');
+
         console.log(`Debe ser traido a la zona horaria de Chile ${emailMoment}`);
 
         const emailDateDayIndex = emailMoment.day();
         const emailDateHour = emailMoment.hour();
         const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
         const isFriday = emailDateDayIndex === 5;
-        const isAfterCutoff = emailDateHour >= 12;
+        const isAfterCutoff = emailDateHour >= RM_DELIVERY_CUTOFF_HOUR;
         const isWeekendLikeBlock = (isFriday && isAfterCutoff) || isWeekend;
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
@@ -315,4 +456,4 @@ function diffToNextDeliveryDay(deliveryDayIndexes, nextIndex, orderDate) {
 // export default findDeliveryDayByComuna; // Uncomment this line if using ES6 modules
 
 export default findDeliveryDayByComuna; // Export the function for use in other files
-export { getAllDeliveryCommunities, getDeliveryDayIndexesByComuna };
+export { getAllDeliveryCommunities, getDeliveryDayIndexesByComuna, resolveDispatchCutoffHourByComuna };

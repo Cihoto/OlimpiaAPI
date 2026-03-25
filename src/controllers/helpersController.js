@@ -1,11 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { createHash, randomUUID } from 'crypto';
 import csvParser from 'csv-parser';
 import OpenAI from 'openai';
 import moment from 'moment';
 import XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
-import findDeliveryDayByComuna from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
+import findDeliveryDayByComuna, { resolveDispatchCutoffHourByComuna } from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 import findRappiDeliveryDayByComuna from '../utils/findRappiDeliveryDate.js';
 import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 import {
@@ -23,6 +24,12 @@ import {
     insertProcessedSenderOrder
 } from '../services/mongoOrderRegistry.js';
 import {
+    createManualOcRecord,
+    findManualOcRecord,
+    updateManualOcRecord,
+    appendManualOcTimeline
+} from '../services/mongoManualOcRegistry.js';
+import {
     buildGmailClient,
     decodeBase64Url,
     extractEmailAddress,
@@ -37,6 +44,32 @@ const KEY_LOGISTICS_FIXED_RUT = '96.930.440-6';
 const KEY_LOGISTICS_SENDER = 'fax@keylogistics.cl';
 const PEDIDOS_YA_SENDER = 'compras.marketds@pedidosya.com';
 const RAPPI_TURBO_SENDER = 'tomas.bravo@rappi.com';
+const MAKE_MANUAL_OC_WEBHOOK_URL = process.env.MAKE_MANUAL_OC_WEBHOOK_URL || '';
+
+const MANUAL_OC_CLIENT_PROFILES = Object.freeze({
+    PEYA: Object.freeze({
+        sourceClientCode: 'PEYA',
+        sourceClientName: 'PedidosYa',
+        syntheticSender: PEDIDOS_YA_SENDER,
+        parserProfile: 'pedidos_ya_excel_v1'
+    })
+});
+
+const MANUAL_OC_DEFAULT_GIRO = 'COMERCIALIZADORA AL POR MAYOR Y MENOR DE ALIMENTOS';
+const MANUAL_OC_DEFAULT_STORAGE = 'BODEGACENTRAL';
+const MANUAL_OC_DEFAULT_SHOP_ID = 'Local';
+const MANUAL_OC_DEFAULT_PRICE_LIST = '1';
+const MANUAL_OC_DEFAULT_DOCUMENT_TYPE = 'FVAELECT';
+const MANUAL_OC_DISPATCH_CUTOFF_HOUR = Number.parseInt(process.env.MANUAL_OC_DISPATCH_CUTOFF_HOUR || '12', 10);
+
+const MANUAL_OC_DETAIL_MAPPING = Object.freeze([
+    Object.freeze({ quantityKey: 'Pedido_Cantidad_Amargo', code: '17798147780069', priceBucket: '150' }),
+    Object.freeze({ quantityKey: 'Pedido_Cantidad_Leche', code: '17798147780052', priceBucket: '150' }),
+    Object.freeze({ quantityKey: 'Pedido_Cantidad_Pink', code: '70724043633542', priceBucket: '150' }),
+    Object.freeze({ quantityKey: 'Pedido_Cantidad_Pink_90g', code: '70724043633549', priceBucket: '90' }),
+    Object.freeze({ quantityKey: 'Pedido_Cantidad_Leche_90g', code: '70724043633550', priceBucket: '90' }),
+    Object.freeze({ quantityKey: 'Pedido_Cantidad_Free', code: '70724043633551', priceBucket: 'free' })
+]);
 
 /**
  * KeyLogistics master data for billing/shipping resolution.
@@ -146,7 +179,11 @@ function buildKeyLogisticsClientData(clientId, emailDate, extractedBoxPrice) {
     }
 
     const data = { ...profile };
-    const deliveryDay = findDeliveryDayByComuna(data['Comuna Despacho'], emailDate);
+    const deliveryDay = findDeliveryDayByComuna(
+        data['Comuna Despacho'],
+        emailDate,
+        getRegionFromClientRecord(data)
+    );
     if (deliveryDay != null) {
         data.deliveryDay = `${deliveryDay}`;
     } else if (String(data['Dirección Despacho'] || '').toLowerCase() === 'retiro') {
@@ -363,6 +400,1158 @@ async function readCSV(req, res) {
     } catch (error) {
         res.status(500).json({ error: 'Error reading the CSV file' });
     }
+}
+
+function getManualOcClientProfile(sourceClientCode) {
+    const normalizedCode = String(sourceClientCode || '')
+        .trim()
+        .toUpperCase();
+    return MANUAL_OC_CLIENT_PROFILES[normalizedCode] || null;
+}
+
+function parseExcelSerialDate(rawValue) {
+    if (!/^\d{5,6}$/.test(String(rawValue || '').trim())) {
+        return null;
+    }
+
+    const serial = Number(rawValue);
+    if (!Number.isFinite(serial) || serial < 25000 || serial > 80000) {
+        return null;
+    }
+
+    const parsed = XLSX?.SSF?.parse_date_code(serial);
+    if (!parsed || !parsed.y || !parsed.m || !parsed.d) {
+        return null;
+    }
+
+    const date = moment({
+        year: parsed.y,
+        month: parsed.m - 1,
+        day: parsed.d
+    });
+
+    if (!date.isValid()) {
+        return null;
+    }
+
+    const year = date.year();
+    if (year < 2020 || year > 2100) {
+        return null;
+    }
+
+    return date.format('YYYY-MM-DD');
+}
+
+function parseManualDateCandidate(value) {
+    if (!value) {
+        return null;
+    }
+
+    const rawValue = String(value).trim();
+    if (!rawValue) {
+        return null;
+    }
+
+    const excelSerialDate = parseExcelSerialDate(rawValue);
+    if (excelSerialDate) {
+        return excelSerialDate;
+    }
+
+    const normalized = rawValue
+        .replace(/\./g, '/')
+        .replace(/-/g, '/')
+        .replace(/\s+/g, '');
+
+    const formats = ['DD/MM/YYYY', 'D/M/YYYY', 'YYYY/MM/DD', 'DD/MM/YY', 'D/M/YY'];
+    const parsed = moment(normalized, formats, true);
+    if (!parsed.isValid()) {
+        return null;
+    }
+
+    const year = parsed.year();
+    if (year < 2020 || year > 2100) {
+        return null;
+    }
+
+    return parsed.format('YYYY-MM-DD');
+}
+
+function detectOcDateFromText(text) {
+    const sourceText = String(text || '');
+    if (!sourceText.trim()) {
+        return {
+            date: null,
+            confidence: 'none',
+            method: 'empty_text'
+        };
+    }
+
+    const labeledRegex = /fecha(?:\s+de)?(?:\s+oc|\s+orden|\s+pedido|\s+emision|\s+emisión|\s+po)?[\s:.\-|]{0,20}(\d{5,6}|\d{1,4}[\/\-.]\d{1,2}[\/\-.]\d{1,4})/i;
+    const labeledMatch = sourceText.match(labeledRegex);
+    if (labeledMatch && labeledMatch[1]) {
+        const parsedDate = parseManualDateCandidate(labeledMatch[1]);
+        if (parsedDate) {
+            return {
+                date: parsedDate,
+                confidence: 'high',
+                method: 'labeled_match',
+                raw: labeledMatch[1]
+            };
+        }
+    }
+
+    const genericRegex = /(\b\d{5,6}\b|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/g;
+    const candidates = sourceText.match(genericRegex) || [];
+    for (const candidate of candidates) {
+        const parsedDate = parseManualDateCandidate(candidate);
+        if (parsedDate) {
+            return {
+                date: parsedDate,
+                confidence: 'medium',
+                method: 'generic_match',
+                raw: candidate
+            };
+        }
+    }
+
+    return {
+        date: null,
+        confidence: 'none',
+        method: 'not_found'
+    };
+}
+
+function decodeFileBase64ToBuffer(fileBase64) {
+    if (!fileBase64 || typeof fileBase64 !== 'string') {
+        throw new Error('fileBase64 es requerido');
+    }
+    const payload = fileBase64.includes(',')
+        ? fileBase64.split(',').pop()
+        : fileBase64;
+
+    return Buffer.from(payload || '', 'base64');
+}
+
+function columnIndexToExcelLabel(index) {
+    let value = Number(index);
+    let label = '';
+
+    while (value > 0) {
+        const remainder = (value - 1) % 26;
+        label = String.fromCharCode(65 + remainder) + label;
+        value = Math.floor((value - 1) / 26);
+    }
+
+    return label || 'A';
+}
+
+function formatPreviewNumber(value) {
+    if (!Number.isFinite(value)) {
+        return '';
+    }
+
+    if (Number.isInteger(value)) {
+        return String(value);
+    }
+
+    if (Math.abs(value) < 1) {
+        return value.toFixed(4).replace(/\.?0+$/, '');
+    }
+
+    return value.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function normalizePreviewCell(rawCell) {
+    if (rawCell === null || rawCell === undefined) {
+        return '';
+    }
+
+    if (typeof rawCell === 'number') {
+        return formatPreviewNumber(rawCell);
+    }
+
+    return String(rawCell).replace(/\s+/g, ' ').trim();
+}
+
+function formatExcelPreviewCell(rowValues, colIndex) {
+    const rawValue = rowValues[colIndex];
+    const normalized = normalizePreviewCell(rawValue);
+    if (!normalized) {
+        return '';
+    }
+
+    if (!/^\d{5,6}$/.test(normalized)) {
+        return normalized;
+    }
+
+    const prevValue = colIndex > 0 ? normalizePreviewCell(rowValues[colIndex - 1]) : '';
+    const nextValue = colIndex + 1 < rowValues.length ? normalizePreviewCell(rowValues[colIndex + 1]) : '';
+    const rowHasFechaKeyword = rowValues.some((value) => /fecha/i.test(normalizePreviewCell(value)));
+    const cellHasFechaNeighbor = /fecha/i.test(prevValue) || /fecha/i.test(nextValue);
+
+    if (!rowHasFechaKeyword && !cellHasFechaNeighbor) {
+        return normalized;
+    }
+
+    const parsedDate = parseExcelSerialDate(normalized);
+    return parsedDate || normalized;
+}
+
+function normalizePreviewLabel(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function getCellValue(rowValues, index) {
+    if (!Array.isArray(rowValues) || index < 0 || index >= rowValues.length) {
+        return '';
+    }
+    return normalizePreviewCell(rowValues[index]);
+}
+
+function getNextNonEmptyCell(rowValues, fromIndex) {
+    if (!Array.isArray(rowValues)) {
+        return '';
+    }
+
+    for (let col = fromIndex + 1; col < rowValues.length; col += 1) {
+        const value = normalizePreviewCell(rowValues[col]);
+        if (value) {
+            return value;
+        }
+    }
+
+    return '';
+}
+
+function parseOptionalNumber(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    const text = String(value).trim();
+    if (!text) {
+        return null;
+    }
+
+    const normalized = text
+        .replace(/\s+/g, '')
+        .replace(/\$/g, '')
+        .replace(/\u00A0/g, '')
+        .replace(/\.(?=\d{3}\b)/g, '')
+        .replace(',', '.');
+
+    const cleaned = normalized.replace(/[^0-9.-]/g, '');
+    if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === '-.') {
+        return null;
+    }
+
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalDate(value) {
+    const parsed = parseManualDateCandidate(value);
+    return parsed || null;
+}
+
+function resolvePeyaMetadataKey(label) {
+    const normalized = normalizePreviewLabel(label);
+    if (!normalized) {
+        return null;
+    }
+
+    if (normalized === 'store') return 'store';
+    if (normalized === 'proveedor') return 'proveedor';
+    if (normalized === 'razon social') return 'razonSocial';
+    if (normalized === 'rut') return 'rut';
+    if (normalized.startsWith('fecha emision')) return 'fechaEmision';
+    if (normalized.startsWith('fecha entrega')) return 'fechaEntrega';
+    if (normalized.startsWith('fecha venc po') || normalized.startsWith('fecha vencimiento po')) return 'fechaVencimientoPo';
+    if (normalized.startsWith('direccion entrega')) return 'direccionEntrega';
+    if (normalized === 'provincia') return 'provincia';
+    if (normalized === 'pais') return 'pais';
+    if (normalized.startsWith('horario recepcion')) return 'horarioRecepcion';
+    if (normalized.startsWith('contacto encargado tienda')) return 'contactoEncargadoTienda';
+    if (normalized.startsWith('costo total excl iva')) return 'costoTotalExclIva';
+    if (normalized === 'iva') return 'ivaTotal';
+    if (normalized.startsWith('costo total inc iva')) return 'costoTotalIncIva';
+
+    return null;
+}
+
+function findPeyaItemHeaderRow(normalizedRows) {
+    for (let rowIndex = 0; rowIndex < normalizedRows.length; rowIndex += 1) {
+        const row = normalizedRows[rowIndex];
+        const labels = row.map((cell) => normalizePreviewLabel(cell));
+        const hasSku = labels.some((label) => label === 'n sku' || label === 'sku');
+        const hasDescription = labels.some((label) => label === 'descripcion');
+        const hasQty = labels.some((label) => label.includes('cantidad cajas') || label.includes('cantidad unidades'));
+        if (hasSku && hasDescription && hasQty) {
+            return rowIndex;
+        }
+    }
+
+    return -1;
+}
+
+function mapPeyaItemColumns(headerRow) {
+    const columnMap = {};
+    headerRow.forEach((cell, colIndex) => {
+        const label = normalizePreviewLabel(cell);
+        if (!label) {
+            return;
+        }
+
+        if (columnMap.sku === undefined && (label === 'n sku' || label === 'sku')) {
+            columnMap.sku = colIndex;
+            return;
+        }
+        if (columnMap.ean === undefined && label === 'ean') {
+            columnMap.ean = colIndex;
+            return;
+        }
+        if (columnMap.internalCode === undefined && label.includes('codigo interno proveedor')) {
+            columnMap.internalCode = colIndex;
+            return;
+        }
+        if (columnMap.description === undefined && label === 'descripcion') {
+            columnMap.description = colIndex;
+            return;
+        }
+        if (columnMap.quantityBoxes === undefined && label.includes('cantidad cajas')) {
+            columnMap.quantityBoxes = colIndex;
+            return;
+        }
+        if (columnMap.quantityUnits === undefined && label.includes('cantidad unidades')) {
+            columnMap.quantityUnits = colIndex;
+            return;
+        }
+        if (columnMap.unitCost === undefined && (label.includes('costo s unidad') || label.includes('costo unidad'))) {
+            columnMap.unitCost = colIndex;
+            return;
+        }
+        if (columnMap.costExclIva === undefined && label.includes('costo excl iva')) {
+            columnMap.costExclIva = colIndex;
+            return;
+        }
+        if (columnMap.iva === undefined && label === 'iva') {
+            columnMap.iva = colIndex;
+            return;
+        }
+        if (columnMap.costIncIva === undefined && label.includes('costo inc iva')) {
+            columnMap.costIncIva = colIndex;
+        }
+    });
+
+    return columnMap;
+}
+
+function extractPeyaExcelAnalysis(normalizedRows) {
+    if (!Array.isArray(normalizedRows) || normalizedRows.length === 0) {
+        return null;
+    }
+
+    const itemHeaderRowIndex = findPeyaItemHeaderRow(normalizedRows);
+    const metadataRows = itemHeaderRowIndex >= 0
+        ? normalizedRows.slice(0, itemHeaderRowIndex)
+        : normalizedRows;
+    const metadata = {};
+
+    let purchaseOrderNumber = null;
+    for (const row of metadataRows) {
+        for (let colIndex = 0; colIndex < row.length; colIndex += 1) {
+            const cell = normalizePreviewCell(row[colIndex]);
+            if (!cell) {
+                continue;
+            }
+
+            if (!purchaseOrderNumber && /^po\d{4,}$/i.test(cell)) {
+                purchaseOrderNumber = cell.toUpperCase();
+            }
+
+            const metadataKey = resolvePeyaMetadataKey(cell);
+            if (!metadataKey || metadata[metadataKey]) {
+                continue;
+            }
+
+            metadata[metadataKey] = getNextNonEmptyCell(row, colIndex) || null;
+        }
+    }
+
+    const items = [];
+    if (itemHeaderRowIndex >= 0) {
+        const headerRow = normalizedRows[itemHeaderRowIndex];
+        const colMap = mapPeyaItemColumns(headerRow);
+        let emptyStreak = 0;
+
+        for (let rowIndex = itemHeaderRowIndex + 1; rowIndex < normalizedRows.length; rowIndex += 1) {
+            const row = normalizedRows[rowIndex];
+            const sku = getCellValue(row, colMap.sku);
+            const ean = getCellValue(row, colMap.ean);
+            const internalCode = getCellValue(row, colMap.internalCode);
+            const description = getCellValue(row, colMap.description);
+            const quantityBoxesRaw = getCellValue(row, colMap.quantityBoxes);
+            const quantityUnitsRaw = getCellValue(row, colMap.quantityUnits);
+            const unitCostRaw = getCellValue(row, colMap.unitCost);
+            const costExclIvaRaw = getCellValue(row, colMap.costExclIva);
+            const ivaRaw = getCellValue(row, colMap.iva);
+            const costIncIvaRaw = getCellValue(row, colMap.costIncIva);
+
+            const hasRelevantData = Boolean(
+                sku
+                || ean
+                || internalCode
+                || description
+                || quantityBoxesRaw
+                || quantityUnitsRaw
+                || unitCostRaw
+                || costExclIvaRaw
+                || ivaRaw
+                || costIncIvaRaw
+            );
+
+            if (!hasRelevantData) {
+                emptyStreak += 1;
+                if (emptyStreak >= 6) {
+                    break;
+                }
+                continue;
+            }
+
+            emptyStreak = 0;
+            if (!description && !sku && !ean) {
+                continue;
+            }
+
+            items.push({
+                rowNumber: rowIndex + 1,
+                sku: sku || null,
+                ean: ean || null,
+                internalCode: internalCode || null,
+                description: description || null,
+                quantityBoxes: parseOptionalNumber(quantityBoxesRaw),
+                quantityUnits: parseOptionalNumber(quantityUnitsRaw),
+                unitCost: parseOptionalNumber(unitCostRaw),
+                costExclIva: parseOptionalNumber(costExclIvaRaw),
+                iva: parseOptionalNumber(ivaRaw),
+                costIncIva: parseOptionalNumber(costIncIvaRaw)
+            });
+        }
+    }
+
+    const quantityBoxesTotal = items.reduce((acc, item) => acc + (item.quantityBoxes || 0), 0);
+    const quantityUnitsTotal = items.reduce((acc, item) => acc + (item.quantityUnits || 0), 0);
+    const costExclIvaTotal = items.reduce((acc, item) => acc + (item.costExclIva || 0), 0);
+    const costIncIvaTotal = items.reduce((acc, item) => acc + (item.costIncIva || 0), 0);
+
+    return {
+        pattern: 'peya_excel_oc_v1',
+        purchaseOrderNumber,
+        metadata: {
+            store: metadata.store || null,
+            proveedor: metadata.proveedor || null,
+            razonSocial: metadata.razonSocial || null,
+            rut: metadata.rut || null,
+            direccionEntrega: metadata.direccionEntrega || null,
+            provincia: metadata.provincia || null,
+            pais: metadata.pais || null,
+            horarioRecepcion: metadata.horarioRecepcion || null,
+            contactoEncargadoTienda: metadata.contactoEncargadoTienda || null
+        },
+        dates: {
+            fechaEmision: parseOptionalDate(metadata.fechaEmision),
+            fechaEntrega: parseOptionalDate(metadata.fechaEntrega),
+            fechaVencimientoPo: parseOptionalDate(metadata.fechaVencimientoPo)
+        },
+        totals: {
+            costoTotalExclIva: parseOptionalNumber(metadata.costoTotalExclIva),
+            ivaTotal: parseOptionalNumber(metadata.ivaTotal),
+            costoTotalIncIva: parseOptionalNumber(metadata.costoTotalIncIva)
+        },
+        items,
+        itemStats: {
+            count: items.length,
+            quantityBoxesTotal: Math.round(quantityBoxesTotal * 1000) / 1000,
+            quantityUnitsTotal: Math.round(quantityUnitsTotal * 1000) / 1000,
+            costExclIvaTotal: Math.round(costExclIvaTotal * 1000) / 1000,
+            costIncIvaTotal: Math.round(costIncIvaTotal * 1000) / 1000
+        },
+        rowMarkers: {
+            itemHeaderRowNumber: itemHeaderRowIndex >= 0 ? itemHeaderRowIndex + 1 : null
+        }
+    };
+}
+
+function buildExcelPreviewFromBuffer(buffer) {
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const firstSheetName = workbook.SheetNames[0] || '';
+    const firstSheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+    if (!firstSheet) {
+        return null;
+    }
+
+    const maxPreviewRows = Number.parseInt(process.env.MANUAL_OC_PREVIEW_ROWS || '24', 10);
+    const maxPreviewCols = Number.parseInt(process.env.MANUAL_OC_PREVIEW_COLS || '12', 10);
+    const maxReplicaRows = Number.parseInt(process.env.MANUAL_OC_REPLICA_MAX_ROWS || '140', 10);
+    const maxReplicaCols = Number.parseInt(process.env.MANUAL_OC_REPLICA_MAX_COLS || '16', 10);
+    const rows = XLSX.utils.sheet_to_json(firstSheet, {
+        header: 1,
+        defval: '',
+        blankrows: false
+    });
+
+    const normalizedRows = rows
+        .map((row) => row.map((cell) => normalizePreviewCell(cell)))
+        .filter((row) => row.some((cell) => cell !== ''));
+    const excelAnalysis = extractPeyaExcelAnalysis(normalizedRows);
+
+    const trimmedRows = normalizedRows
+        .slice(0, maxPreviewRows)
+        .map((row, index) => ({
+            rowNumber: index + 1,
+            values: row.slice(0, maxPreviewCols).map((cell, colIndex) => formatExcelPreviewCell(row, colIndex))
+        }))
+        .filter((row) => row.values.some((cell) => normalizePreviewCell(cell) !== ''));
+
+    const usedColumnIndexesSet = new Set();
+    for (const row of trimmedRows) {
+        row.values.forEach((cell, colIndex) => {
+            if (normalizePreviewCell(cell) !== '') {
+                usedColumnIndexesSet.add(colIndex);
+            }
+        });
+    }
+
+    const usedColumnIndexes = Array.from(usedColumnIndexesSet).sort((a, b) => a - b);
+    const columns = usedColumnIndexes.map((index) => columnIndexToExcelLabel(index + 1));
+    const rowNumbers = trimmedRows.map((row) => row.rowNumber);
+    const previewRows = trimmedRows.map((row) => (
+        usedColumnIndexes.map((colIndex) => row.values[colIndex] || '')
+    ));
+
+    const replicaSourceRows = normalizedRows
+        .slice(0, maxReplicaRows)
+        .map((row) => row.slice(0, maxReplicaCols).map((cell, colIndex) => formatExcelPreviewCell(row, colIndex)));
+
+    const replicaUsedColumnsSet = new Set();
+    for (const row of replicaSourceRows) {
+        row.forEach((cell, colIndex) => {
+            if (normalizePreviewCell(cell) !== '') {
+                replicaUsedColumnsSet.add(colIndex);
+            }
+        });
+    }
+    const replicaUsedColumns = Array.from(replicaUsedColumnsSet).sort((a, b) => a - b);
+    const replicaRows = replicaSourceRows.map((row) => replicaUsedColumns.map((colIndex) => row[colIndex] || ''));
+    const replicaSheet = XLSX.utils.aoa_to_sheet(replicaRows);
+    const rawHtml = XLSX.utils.sheet_to_html(replicaSheet, {
+        id: 'manual-oc-excel-preview'
+    });
+    const safeHtml = String(rawHtml || '').replace(/<script[\s\S]*?<\/script>/gi, '');
+    const rowsTruncated = normalizedRows.length > replicaRows.length;
+
+    return {
+        sheetName: firstSheetName,
+        totalRows: normalizedRows.length,
+        visibleRows: replicaRows.length,
+        rowsTruncated,
+        totalColumns: columns.length,
+        columns,
+        rowNumbers,
+        rows: previewRows,
+        html: safeHtml,
+        analysis: excelAnalysis
+    };
+}
+
+async function extractManualOcTextFromFile({ fileName, mimeType, fileBuffer }) {
+    const safeFileName = String(fileName || '').trim().toLowerCase();
+    const safeMimeType = String(mimeType || '').trim().toLowerCase();
+    const isPdf = safeFileName.endsWith('.pdf') || safeMimeType.includes('pdf');
+    const isExcel = /\.xlsx?$/i.test(safeFileName)
+        || safeMimeType.includes('spreadsheetml')
+        || safeMimeType.includes('ms-excel');
+
+    if (isPdf) {
+        return {
+            fileType: 'pdf',
+            text: await pdfBufferToText(fileBuffer),
+            excelPreview: null
+        };
+    }
+
+    if (isExcel) {
+        return {
+            fileType: 'excel',
+            text: excelBufferToText(fileBuffer),
+            excelPreview: buildExcelPreviewFromBuffer(fileBuffer)
+        };
+    }
+
+    throw new Error('Tipo de archivo no soportado. Solo .xlsx, .xls o .pdf');
+}
+
+function buildManualReadEmailPayload({
+    manualOcId,
+    profile,
+    fileName,
+    excelText,
+    emailDate,
+    uploadedBy
+}) {
+    const safeFileName = String(fileName || 'manual_oc.xlsx');
+    const emailDateValue = String(emailDate || '').trim() || new Date().toISOString();
+    return {
+        emailBody: `[MANUAL_OC] Archivo ${safeFileName} cargado por ${uploadedBy || 'usuario_desconocido'}`,
+        emailSubject: `[MANUAL_OC][${profile.sourceClientCode}] ${safeFileName}`,
+        emailAttached: excelText,
+        emailDate: emailDateValue,
+        source: 'manual_portal',
+        sender: profile.syntheticSender,
+        attachmentFilename: safeFileName,
+        manualOc: {
+            id: manualOcId,
+            sourceClientCode: profile.sourceClientCode,
+            sourceClientName: profile.sourceClientName,
+            parserProfile: profile.parserProfile
+        }
+    };
+}
+
+function getObjectValueByKeys(source, keys = []) {
+    if (!source || typeof source !== 'object') {
+        return null;
+    }
+
+    for (const key of keys) {
+        if (!key) {
+            continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+            const value = source[key];
+            if (value !== null && value !== undefined && String(value).trim() !== '') {
+                return value;
+            }
+        }
+    }
+
+    return null;
+}
+
+function parseNumberish(value) {
+    if (value === null || value === undefined || value === '') {
+        return 0;
+    }
+
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : 0;
+    }
+
+    const asString = String(value).trim();
+    if (!asString) {
+        return 0;
+    }
+
+    const normalized = asString
+        .replace(/\s+/g, '')
+        .replace(/\$/g, '')
+        .replace(/\u00A0/g, '')
+        .replace(/\.(?=\d{3}\b)/g, '')
+        .replace(',', '.');
+
+    const cleaned = normalized.replace(/[^0-9.-]/g, '');
+    if (!cleaned) {
+        return 0;
+    }
+
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : 0;
+}
+
+function toPositiveInteger(value) {
+    const parsed = parseNumberish(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 0;
+    }
+    return Math.trunc(parsed);
+}
+
+function pickPreferredPrice(candidates = []) {
+    let fallback = 0;
+    for (const candidate of candidates) {
+        const parsed = parseNumberish(candidate);
+        if (parsed > 0) {
+            return Math.round(parsed);
+        }
+        if (fallback === 0 && Number.isFinite(parsed)) {
+            fallback = Math.round(parsed);
+        }
+    }
+    return fallback;
+}
+
+function parseBooleanLoose(value, fallback = true) {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    if (value === null || value === undefined || value === '') {
+        return fallback;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'si', 'sí', 'y', 'yes'].includes(normalized)) {
+        return true;
+    }
+    if (['false', '0', 'no', 'n'].includes(normalized)) {
+        return false;
+    }
+    return fallback;
+}
+
+function normalizeRegionCode(regionValue) {
+    const normalized = String(regionValue || '')
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!normalized) {
+        return '';
+    }
+    if (normalized === 'RM' || normalized.includes('METROPOLITANA') || normalized === 'SANTIAGO') {
+        return 'RM';
+    }
+    if (normalized === 'V' || normalized === 'VALPARAISO' || normalized.includes('VALPARAISO')) {
+        return 'V';
+    }
+    if (normalized === 'VI' || normalized.includes("O'HIGGINS") || normalized.includes('OHIGGINS')) {
+        return 'VI';
+    }
+
+    return normalized;
+}
+
+function parseDateToDateObject(value) {
+    if (!value && value !== 0) {
+        return null;
+    }
+
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value;
+    }
+
+    const directDate = new Date(value);
+    if (!Number.isNaN(directDate.getTime())) {
+        return directDate;
+    }
+
+    const text = String(value).trim();
+    if (!text) {
+        return null;
+    }
+
+    const parsed = moment(text, [
+        'DD-MM-YYYY HH:mm:ss',
+        'D-M-YYYY HH:mm:ss',
+        'DD/MM/YYYY HH:mm:ss',
+        'D/M/YYYY HH:mm:ss',
+        'YYYY-MM-DD HH:mm:ss',
+        'YYYY-MM-DDTHH:mm:ss.SSSZ',
+        'YYYY-MM-DDTHH:mm:ssZ',
+        'YYYY-MM-DDTHH:mm:ss',
+        'YYYY-MM-DD'
+    ], true);
+
+    if (!parsed.isValid()) {
+        return null;
+    }
+
+    return parsed.toDate();
+}
+
+function toChileTimestampParts(value, options = {}) {
+    const fallbackToNow = options?.fallbackToNow === true;
+    let parsedDate = null;
+
+    if (value !== null && value !== undefined && value !== '') {
+        parsedDate = parseDateToDateObject(value);
+    } else if (fallbackToNow) {
+        parsedDate = new Date();
+    }
+
+    if (!parsedDate) {
+        return null;
+    }
+
+    const formatter = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'America/Santiago',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+
+    const map = {};
+    formatter.formatToParts(parsedDate).forEach((part) => {
+        if (part.type !== 'literal') {
+            map[part.type] = part.value;
+        }
+    });
+
+    const date = `${map.year}-${map.month}-${map.day}`;
+    const time = `${map.hour}:${map.minute}:${map.second}`;
+    return {
+        date,
+        time,
+        dateTime: `${date} ${time}`
+    };
+}
+
+function normalizeManualOcArrivalMeridiem(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'pm') {
+        return 'pm';
+    }
+    return 'am';
+}
+
+function buildManualOcArrivalDateTime({
+    arrivalDate,
+    arrivalMeridiem,
+    fallbackDate,
+    cutoffHourOverride = null
+}) {
+    const dateValue = parseManualDateCandidate(arrivalDate || fallbackDate);
+    if (!dateValue) {
+        return null;
+    }
+
+    const meridiem = normalizeManualOcArrivalMeridiem(arrivalMeridiem);
+    const cutoffHourSource = Number.isFinite(cutoffHourOverride)
+        ? cutoffHourOverride
+        : MANUAL_OC_DISPATCH_CUTOFF_HOUR;
+    const cutoffHour = Number.isFinite(cutoffHourSource)
+        ? Math.min(Math.max(Math.trunc(cutoffHourSource), 0), 23)
+        : 12;
+    const cutoffMoment = moment.tz(
+        `${dateValue} ${String(cutoffHour).padStart(2, '0')}:00:00`,
+        'YYYY-MM-DD HH:mm:ss',
+        'America/Santiago'
+    );
+    const selectedMoment = meridiem === 'pm'
+        ? cutoffMoment.clone().add(1, 'minute')
+        : cutoffMoment.clone().subtract(1, 'minute');
+    const dateTimeIso = selectedMoment.format('YYYY-MM-DDTHH:mm:ssZ');
+    return {
+        date: dateValue,
+        meridiem,
+        dateTimeIso
+    };
+}
+
+function resolveManualOcDispatchCutoffHour({ clientData, emailData }) {
+    const comuna = getObjectValueByKeys(emailData, [
+        'Comuna',
+        'Comuna_despacho',
+        'Comuna despacho'
+    ]) || getObjectValueByKeys(clientData, [
+        'Comuna Despacho',
+        'Comuna despacho',
+        'Comuna'
+    ]) || '';
+
+    const region = getObjectValueByKeys(emailData, [
+        'region',
+        'Region',
+        'RegiÃ³n',
+        'RegiÃƒÂ³n',
+        'RegiÃƒÆ’Ã‚Â³n'
+    ]) || getObjectValueByKeys(clientData, [
+        'region',
+        'RegiÃ³n Despacho',
+        'RegiÃƒÂ³n Despacho',
+        'RegiÃƒÆ’Ã‚Â³n Despacho',
+        'Región Despacho'
+    ]) || '';
+
+    return resolveDispatchCutoffHourByComuna(comuna, region);
+}
+
+function resolveManualOcDeliveryDay({
+    deliveryReservation,
+    clientData,
+    emailData,
+    ocDateConfirmed,
+    arrivalDateTime
+}) {
+    const emissionDate = parseManualDateCandidate(
+        ocDateConfirmed
+        || getObjectValueByKeys(emailData, ['OC_date', 'OC Date', 'Fecha_emision', 'Fecha emision'])
+        || getObjectValueByKeys(clientData, ['OC_date', 'OC Date', 'Fecha_emision', 'Fecha emision'])
+    );
+
+    const comunaCandidates = [
+        getObjectValueByKeys(emailData, [
+            'Comuna',
+            'Comuna_despacho',
+            'Comuna despacho'
+        ]),
+        getObjectValueByKeys(clientData, [
+            'Comuna Despacho',
+            'Comuna despacho',
+            'Comuna'
+        ])
+    ]
+        .map((value) => String(value || '').trim())
+        .filter((value, index, array) => value !== '' && array.indexOf(value) === index);
+
+    const normalizedArrivalDateTime = String(arrivalDateTime || '').trim();
+    const regionForCalculation = getObjectValueByKeys(emailData, [
+        'region',
+        'Region',
+        'RegiÃ³n',
+        'RegiÃƒÂ³n',
+        'RegiÃƒÆ’Ã‚Â³n'
+    ]) || getObjectValueByKeys(clientData, [
+        'region',
+        'RegiÃ³n Despacho',
+        'RegiÃƒÂ³n Despacho',
+        'RegiÃƒÆ’Ã‚Â³n Despacho',
+        'Región Despacho'
+    ]);
+    const arrivalDateTimeIsValid = normalizedArrivalDateTime
+        && moment(normalizedArrivalDateTime, moment.ISO_8601, true).isValid();
+    const dateTimeForCalculation = arrivalDateTimeIsValid
+        ? normalizedArrivalDateTime
+        : (emissionDate ? `${emissionDate}T09:00:00-03:00` : null);
+
+    if (dateTimeForCalculation && comunaCandidates.length > 0) {
+        for (const comuna of comunaCandidates) {
+            const calculatedDeliveryDay = findDeliveryDayByComuna(
+                comuna,
+                dateTimeForCalculation,
+                regionForCalculation
+            );
+            if (calculatedDeliveryDay) {
+                return String(calculatedDeliveryDay).trim();
+            }
+        }
+    }
+
+    const reservedDeliveryDay = String(deliveryReservation?.assignedDeliveryDay || '').trim();
+    if (reservedDeliveryDay) {
+        return reservedDeliveryDay;
+    }
+
+    const csvDeliveryDay = String(getObjectValueByKeys(clientData, ['deliveryDay']) || '').trim();
+    if (csvDeliveryDay) {
+        return csvDeliveryDay;
+    }
+
+    return null;
+}
+
+function buildManualOcBillingPayload({ mergedResult, ocDateConfirmed, arrivalDateTime }) {
+    const merged = mergedResult?.merged || {};
+    const emailData = merged?.EmailData || {};
+    const clientData = merged?.ClientData?.data || merged?.ClientData || {};
+    const deliveryReservation = mergedResult?.deliveryReservation || null;
+
+    const price150 = pickPreferredPrice([
+        getObjectValueByKeys(clientData, ['Precio Caja']),
+        emailData?.precio_caja
+    ]);
+    const price90 = pickPreferredPrice([
+        getObjectValueByKeys(clientData, ['Precio Caja 90']),
+        emailData?.precio_caja_90g
+    ]);
+    const priceFree = pickPreferredPrice([
+        getObjectValueByKeys(clientData, ['Precio Caja Free']),
+        emailData?.precio_caja_free
+    ]);
+
+    const details = MANUAL_OC_DETAIL_MAPPING.map((item) => {
+        let unitPrice = 0;
+        if (item.priceBucket === '150') {
+            unitPrice = price150;
+        } else if (item.priceBucket === '90') {
+            unitPrice = price90;
+        } else if (item.priceBucket === 'free') {
+            unitPrice = priceFree;
+        }
+
+        return {
+            code: item.code,
+            price: unitPrice,
+            quantity: toPositiveInteger(emailData?.[item.quantityKey])
+        };
+    });
+
+    const regionRaw = getObjectValueByKeys(clientData, [
+        'region',
+        'Región Despacho',
+        'RegiÃ³n Despacho'
+    ]);
+    const gloss = getObjectValueByKeys(emailData, [
+        'Direccion_despacho',
+        'Dirección_despacho'
+    ]) || getObjectValueByKeys(clientData, [
+        'Dirección Despacho',
+        'DirecciÃ³n Despacho'
+    ]) || '';
+
+    const paymentConditionRaw = getObjectValueByKeys(clientData, [
+        'diasCredito',
+        'Días Crédito',
+        'Dias Credito'
+    ]);
+    const sellerFileId = getObjectValueByKeys(clientData, ['VENDEDOR ', 'VENDEDOR']) || '';
+    const businessCenter = getObjectValueByKeys(clientData, ['CENTRO DE NEGOCIOS ', 'CENTRO DE NEGOCIOS']) || '';
+    const deliveryDay = resolveManualOcDeliveryDay({
+        deliveryReservation,
+        clientData,
+        emailData,
+        ocDateConfirmed,
+        arrivalDateTime: arrivalDateTime || merged?.emailDate || null
+    });
+    const clientFile = getObjectValueByKeys(emailData, ['Rut', 'RUT'])
+        || getObjectValueByKeys(clientData, ['RUT', 'Rut'])
+        || '';
+
+    return {
+        giro: MANUAL_OC_DEFAULT_GIRO,
+        gloss: String(gloss || '').trim(),
+        region: normalizeRegionCode(regionRaw),
+        shopId: MANUAL_OC_DEFAULT_SHOP_ID,
+        details,
+        storage: MANUAL_OC_DEFAULT_STORAGE,
+        lastFolio: 0,
+        priceList: MANUAL_OC_DEFAULT_PRICE_LIST,
+        clientFile: String(clientFile || '').trim(),
+        firstFolio: 0,
+        isDelivery: parseBooleanLoose(emailData?.isDelivery, true),
+        deliveryDay: deliveryDay ? String(deliveryDay).trim() : null,
+        customFields: [],
+        documentType: MANUAL_OC_DEFAULT_DOCUMENT_TYPE,
+        sellerFileId: String(sellerFileId || '').trim(),
+        reservationId: deliveryReservation?.reservationId || null,
+        businessCenter: String(businessCenter || '').trim(),
+        paymentCondition: paymentConditionRaw !== null && paymentConditionRaw !== undefined
+            ? String(paymentConditionRaw).trim()
+            : '',
+        attachedDocuments: [],
+        ventaRecDesGlobal: [],
+        isTransferDocument: true
+    };
+}
+
+async function sendManualMergedToMake({
+    manualOcId,
+    profile,
+    mergedResult,
+    ocDateDetected,
+    ocDateConfirmed,
+    arrivalDate,
+    arrivalMeridiem,
+    arrivalDateTime,
+    uploadedBy,
+    fileMeta
+}) {
+    if (!MAKE_MANUAL_OC_WEBHOOK_URL) {
+        return {
+            delivered: false,
+            skipped: true,
+            reason: 'missing_make_webhook_url'
+        };
+    }
+
+    const merged = mergedResult?.merged || null;
+    const deliveryReservation = mergedResult?.deliveryReservation || null;
+    const emailData = merged?.EmailData || null;
+    const clientData = merged?.ClientData?.data || merged?.ClientData || null;
+    const billingPayload = buildManualOcBillingPayload({
+        mergedResult,
+        ocDateConfirmed,
+        arrivalDateTime
+    });
+
+    const builtAtChile = toChileTimestampParts(null, { fallbackToNow: true });
+    const receivedAtChile = toChileTimestampParts(
+        merged?.emailDate
+        || (ocDateConfirmed ? `${ocDateConfirmed}T12:00:00-03:00` : null)
+    );
+    const parserExecutionAtChile = toChileTimestampParts(merged?.executionDate || null);
+
+    const makePayload = {
+        source: 'manual_oc',
+        mode: 'TEST_ONLY',
+        testMode: true,
+        preventBilling: true,
+        manualOcId,
+        sourceClientCode: profile.sourceClientCode,
+        sourceClientName: profile.sourceClientName,
+        parserProfile: profile.parserProfile,
+        uploadedBy: uploadedBy || 'usuario_desconocido',
+        fileMeta,
+        ocDateDetected: ocDateDetected || null,
+        ocDateConfirmed: ocDateConfirmed || null,
+        arrivalDate: arrivalDate || null,
+        arrivalMeridiem: arrivalMeridiem || null,
+        arrivalDateTime: arrivalDateTime || null,
+        sentAt: new Date().toISOString(),
+        timingChile: {
+            payloadBuiltAt: builtAtChile?.dateTime || null,
+            payloadBuiltDate: builtAtChile?.date || null,
+            payloadBuiltTime: builtAtChile?.time || null,
+            parserExecutionAt: parserExecutionAtChile?.dateTime || null,
+            parserExecutionDate: parserExecutionAtChile?.date || null,
+            parserExecutionTime: parserExecutionAtChile?.time || null,
+            sourceReceivedAt: receivedAtChile?.dateTime || null,
+            sourceReceivedDate: receivedAtChile?.date || null,
+            sourceReceivedTime: receivedAtChile?.time || null
+        },
+        composition: {
+            emailData,
+            clientData,
+            mergedMeta: {
+                executionDate: merged?.executionDate || null,
+                ocDate: merged?.OC_date || null,
+                emailDate: merged?.emailDate || null,
+                hasMatch: merged?.hasMatch ?? null
+            },
+            deliveryReservation,
+            uploadedBy: uploadedBy || 'usuario_desconocido'
+        },
+        billingPayload,
+        merged,
+        deliveryReservation
+    };
+
+    const makeResponse = await fetch(MAKE_MANUAL_OC_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(makePayload)
+    });
+
+    const responseText = await makeResponse.text();
+    return {
+        delivered: makeResponse.ok,
+        skipped: false,
+        status: makeResponse.status,
+        statusText: makeResponse.statusText,
+        responseText
+    };
 }
 
 /**
@@ -1271,6 +2460,640 @@ async function runReadEmailBodyPayload(payload) {
     });
 }
 
+async function readManualOcExtractDate(req, res) {
+    try {
+        const body = req.body || {};
+        const sourceClientCode = String(body.sourceClientCode || '')
+            .trim()
+            .toUpperCase();
+        const uploadedBy = String(body.uploadedBy || '').trim();
+        const fileName = String(body.fileName || '').trim();
+        const mimeType = String(body.mimeType || '').trim();
+        const fileSize = Number(body.fileSize || 0);
+        const fileBase64 = body.fileBase64;
+
+        if (!uploadedBy) {
+            return res.status(400).json({
+                success: false,
+                error: 'uploadedBy es requerido'
+            });
+        }
+
+        if (!fileName || !fileBase64) {
+            return res.status(400).json({
+                success: false,
+                error: 'fileName y fileBase64 son requeridos'
+            });
+        }
+
+        const profile = getManualOcClientProfile(sourceClientCode);
+        if (!profile) {
+            return res.status(400).json({
+                success: false,
+                error: `sourceClientCode no soportado: ${sourceClientCode}`
+            });
+        }
+
+        const fileBuffer = decodeFileBase64ToBuffer(fileBase64);
+        const fileSha256 = createHash('sha256').update(fileBuffer).digest('hex');
+
+        let extractedFile;
+        try {
+            extractedFile = await extractManualOcTextFromFile({
+                fileName,
+                mimeType,
+                fileBuffer
+            });
+        } catch (fileError) {
+            return res.status(400).json({
+                success: false,
+                error: fileError?.message || 'No se pudo leer el archivo'
+            });
+        }
+
+        const excelAnalysis = extractedFile?.excelPreview?.analysis || null;
+        const detectedDateInfoFromText = detectOcDateFromText(extractedFile.text);
+        const detectedDateInfo = (detectedDateInfoFromText?.date || !excelAnalysis?.dates?.fechaEmision)
+            ? detectedDateInfoFromText
+            : {
+                date: excelAnalysis.dates.fechaEmision,
+                confidence: 'high',
+                method: 'excel_field_fecha_emision'
+            };
+        const manualOcId = randomUUID();
+        const warnings = [];
+
+        if (!detectedDateInfo.date) {
+            warnings.push('No se detecto fecha OC automaticamente, usar fecha manual.');
+        }
+        if (extractedFile.fileType === 'excel' && excelAnalysis && !excelAnalysis.dates?.fechaEmision) {
+            warnings.push('No se detecto Fecha emision en la estructura del Excel.');
+        }
+        if (extractedFile.fileType === 'excel' && excelAnalysis && (excelAnalysis.itemStats?.count || 0) === 0) {
+            warnings.push('No se detectaron items en el bloque de detalle del Excel.');
+        }
+
+        await createManualOcRecord({
+            manualOcId,
+            status: 'date_extracted',
+            sourceClientCode: profile.sourceClientCode,
+            sourceClientName: profile.sourceClientName,
+            parserProfile: profile.parserProfile,
+            syntheticSender: profile.syntheticSender,
+            uploadedBy,
+            fileMeta: {
+                fileName,
+                mimeType,
+                fileSize,
+                fileSha256,
+                fileType: extractedFile.fileType
+            },
+            ocDateDetected: detectedDateInfo.date || null,
+            ocDateDetectedConfidence: detectedDateInfo.confidence,
+            ocDateDetectionMethod: detectedDateInfo.method,
+            rawPayloadForParser: null,
+            excelText: extractedFile.text,
+            excelAnalysis,
+            warnings,
+            timeline: [
+                {
+                    event: 'date_extracted',
+                    fileType: extractedFile.fileType,
+                    at: new Date().toISOString()
+                }
+            ]
+        });
+
+        return res.status(200).json({
+            success: true,
+            manualOcId,
+            sourceClientCode: profile.sourceClientCode,
+            sourceClientName: profile.sourceClientName,
+            parserProfile: profile.parserProfile,
+            fileType: extractedFile.fileType,
+            ocDateDetected: detectedDateInfo.date || null,
+            ocDateDetectedConfidence: detectedDateInfo.confidence,
+            ocDateDetectionMethod: detectedDateInfo.method,
+            excelPreview: extractedFile.excelPreview || null,
+            excelAnalysis,
+            warnings
+        });
+    } catch (error) {
+        console.error('Error en readManualOcExtractDate:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'No se pudo extraer fecha manual OC',
+            details: error?.message || String(error)
+        });
+    }
+}
+
+async function readManualOcPreview(req, res) {
+    try {
+        const body = req.body || {};
+        const sourceClientCode = String(body.sourceClientCode || '')
+            .trim()
+            .toUpperCase();
+        const uploadedBy = String(body.uploadedBy || '').trim();
+        const fileName = String(body.fileName || '').trim();
+        const mimeType = String(body.mimeType || '').trim();
+        const fileSize = Number(body.fileSize || 0);
+        const fileBase64 = body.fileBase64;
+
+        if (!uploadedBy) {
+            return res.status(400).json({
+                success: false,
+                error: 'uploadedBy es requerido'
+            });
+        }
+
+        if (!fileName || !fileBase64) {
+            return res.status(400).json({
+                success: false,
+                error: 'fileName y fileBase64 son requeridos'
+            });
+        }
+
+        const profile = getManualOcClientProfile(sourceClientCode);
+        if (!profile) {
+            return res.status(400).json({
+                success: false,
+                error: `sourceClientCode no soportado: ${sourceClientCode}`
+            });
+        }
+
+        if (!/\.xlsx?$/i.test(fileName)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Solo se aceptan archivos Excel (.xlsx/.xls) para este flujo'
+            });
+        }
+
+        const fileBuffer = decodeFileBase64ToBuffer(fileBase64);
+        const fileSha256 = createHash('sha256').update(fileBuffer).digest('hex');
+        const excelText = excelBufferToText(fileBuffer);
+
+        const detectedDateInfo = detectOcDateFromText(excelText);
+        const manualOcId = randomUUID();
+        const emailDateForPreview = detectedDateInfo.date
+            ? `${detectedDateInfo.date}T12:00:00-03:00`
+            : new Date().toISOString();
+
+        const payload = buildManualReadEmailPayload({
+            manualOcId,
+            profile,
+            fileName,
+            excelText,
+            emailDate: emailDateForPreview,
+            uploadedBy
+        });
+
+        await createManualOcRecord({
+            manualOcId,
+            status: 'preview_processing',
+            sourceClientCode: profile.sourceClientCode,
+            sourceClientName: profile.sourceClientName,
+            parserProfile: profile.parserProfile,
+            syntheticSender: profile.syntheticSender,
+            uploadedBy,
+            fileMeta: {
+                fileName,
+                mimeType,
+                fileSize,
+                fileSha256
+            },
+            ocDateDetected: detectedDateInfo.date || null,
+            ocDateDetectedConfidence: detectedDateInfo.confidence,
+            ocDateDetectionMethod: detectedDateInfo.method,
+            rawPayloadForParser: payload,
+            excelText,
+            timeline: [
+                {
+                    event: 'preview_requested',
+                    at: new Date().toISOString()
+                }
+            ]
+        });
+
+        const previewResponse = await runReadEmailBodyPayload(payload);
+        const previewSuccess = previewResponse.status >= 200 && previewResponse.status < 300;
+
+        const warnings = [];
+        if (!detectedDateInfo.date) {
+            warnings.push('No se detecto fecha OC automaticamente, usar fecha manual.');
+        }
+        if (!previewSuccess) {
+            warnings.push('El parser no pudo construir merged valido en preview.');
+        }
+
+        await updateManualOcRecord(manualOcId, {
+            status: previewSuccess ? 'preview_ready' : 'preview_failed',
+            previewStatusCode: previewResponse.status,
+            previewResponseBody: previewResponse.body,
+            warnings
+        });
+
+        await appendManualOcTimeline(manualOcId, {
+            event: previewSuccess ? 'preview_ready' : 'preview_failed',
+            statusCode: previewResponse.status
+        });
+
+        return res.status(previewSuccess ? 200 : 422).json({
+            success: previewSuccess,
+            manualOcId,
+            sourceClientCode: profile.sourceClientCode,
+            sourceClientName: profile.sourceClientName,
+            parserProfile: profile.parserProfile,
+            ocDateDetected: detectedDateInfo.date || null,
+            ocDateDetectedConfidence: detectedDateInfo.confidence,
+            warnings,
+            preview: {
+                status: previewResponse.status,
+                body: previewResponse.body
+            }
+        });
+    } catch (error) {
+        console.error('Error en readManualOcPreview:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'No se pudo procesar preview manual OC',
+            details: error?.message || String(error)
+        });
+    }
+}
+
+async function ensureManualOcDispatchContext({
+    manualOcId,
+    record,
+    profile,
+    uploadedBy,
+    ocDateConfirmed
+}) {
+    const cachedContext = record?.dispatchContext || null;
+    const cachedHasData = cachedContext
+        && typeof cachedContext === 'object'
+        && cachedContext.clientData
+        && Object.keys(cachedContext.clientData || {}).length > 0;
+    if (cachedHasData) {
+        return {
+            dispatchContext: cachedContext,
+            fromCache: true
+        };
+    }
+
+    const parserPayload = buildManualReadEmailPayload({
+        manualOcId,
+        profile,
+        fileName: record?.fileMeta?.fileName || 'manual_oc.xlsx',
+        excelText: record.excelText || '',
+        emailDate: `${ocDateConfirmed}T09:00:00-03:00`,
+        uploadedBy: uploadedBy || record.uploadedBy
+    });
+
+    const parserResponse = await runReadEmailBodyPayload(parserPayload);
+    const parserSuccess = parserResponse.status >= 200 && parserResponse.status < 300;
+    if (!parserSuccess) {
+        const parserError = new Error('No se pudo construir contexto de despacho');
+        parserError.parser = {
+            status: parserResponse.status,
+            body: parserResponse.body
+        };
+        throw parserError;
+    }
+
+    const merged = parserResponse.body?.merged || {};
+    const dispatchContext = {
+        emailData: merged?.EmailData || {},
+        clientData: merged?.ClientData?.data || merged?.ClientData || {},
+        deliveryReservation: parserResponse.body?.deliveryReservation || null,
+        contextBuiltAt: new Date().toISOString()
+    };
+
+    await updateManualOcRecord(manualOcId, {
+        dispatchContext
+    });
+    await appendManualOcTimeline(manualOcId, {
+        event: 'dispatch_context_built'
+    });
+
+    return {
+        dispatchContext,
+        fromCache: false
+    };
+}
+
+async function readManualOcDispatchPreview(req, res) {
+    try {
+        const body = req.body || {};
+        const manualOcId = String(body.manualOcId || '').trim();
+        const ocDateConfirmed = String(body.ocDateConfirmed || '').trim();
+        const arrivalDate = String(body.arrivalDate || '').trim();
+        const arrivalMeridiem = normalizeManualOcArrivalMeridiem(body.arrivalMeridiem);
+        const uploadedBy = String(body.uploadedBy || '').trim();
+
+        if (!manualOcId) {
+            return res.status(400).json({
+                success: false,
+                error: 'manualOcId es requerido'
+            });
+        }
+
+        const record = await findManualOcRecord(manualOcId);
+        if (!record) {
+            return res.status(404).json({
+                success: false,
+                error: `No existe registro manual OC (${manualOcId})`
+            });
+        }
+
+        const profile = getManualOcClientProfile(record.sourceClientCode);
+        if (!profile) {
+            return res.status(400).json({
+                success: false,
+                error: `sourceClientCode no soportado: ${record.sourceClientCode}`
+            });
+        }
+
+        const confirmedDate = parseManualDateCandidate(
+            ocDateConfirmed
+            || record.ocDateConfirmed
+            || record.ocDateDetected
+        );
+        if (!confirmedDate) {
+            return res.status(400).json({
+                success: false,
+                error: 'ocDateConfirmed invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+            });
+        }
+
+        let dispatchContext;
+        let dispatchContextFromCache = false;
+        try {
+            const resolvedContext = await ensureManualOcDispatchContext({
+                manualOcId,
+                record,
+                profile,
+                uploadedBy,
+                ocDateConfirmed: confirmedDate
+            });
+            dispatchContext = resolvedContext.dispatchContext;
+            dispatchContextFromCache = resolvedContext.fromCache === true;
+        } catch (contextError) {
+            if (contextError?.parser) {
+                return res.status(422).json({
+                    success: false,
+                    error: 'No se pudo calcular preview de despacho',
+                    parser: contextError.parser
+                });
+            }
+            throw contextError;
+        }
+
+        const cutoffHourForDispatch = resolveManualOcDispatchCutoffHour({
+            clientData: dispatchContext?.clientData || {},
+            emailData: dispatchContext?.emailData || {}
+        });
+        const arrivalInfo = buildManualOcArrivalDateTime({
+            arrivalDate: arrivalDate || confirmedDate,
+            arrivalMeridiem,
+            fallbackDate: confirmedDate,
+            cutoffHourOverride: cutoffHourForDispatch
+        });
+        if (!arrivalInfo) {
+            return res.status(400).json({
+                success: false,
+                error: 'arrivalDate invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+            });
+        }
+
+        const dispatchPreviewDate = resolveManualOcDeliveryDay({
+            deliveryReservation: dispatchContext?.deliveryReservation || null,
+            clientData: dispatchContext?.clientData || {},
+            emailData: dispatchContext?.emailData || {},
+            ocDateConfirmed: confirmedDate,
+            arrivalDateTime: arrivalInfo.dateTimeIso
+        }) || null;
+
+        const clientData = dispatchContext?.clientData || {};
+        const comuna = getObjectValueByKeys(clientData, [
+            'Comuna Despacho',
+            'Comuna despacho',
+            'Comuna'
+        ]);
+
+        await updateManualOcRecord(manualOcId, {
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem,
+            dispatchPreviewDate,
+            dispatchPreviewAt: new Date().toISOString()
+        });
+        await appendManualOcTimeline(manualOcId, {
+            event: 'dispatch_preview_calculated',
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem,
+            dispatchPreviewDate
+        });
+
+        return res.status(200).json({
+            success: true,
+            manualOcId,
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem,
+            arrivalDateTime: arrivalInfo.dateTimeIso,
+            dispatchPreviewDate,
+            comuna: comuna ? String(comuna).trim() : null,
+            dispatchContextFromCache
+        });
+    } catch (error) {
+        console.error('Error en readManualOcDispatchPreview:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'No se pudo calcular preview de despacho manual OC',
+            details: error?.message || String(error)
+        });
+    }
+}
+
+async function readManualOcSubmit(req, res) {
+    try {
+        const body = req.body || {};
+        const manualOcId = String(body.manualOcId || '').trim();
+        const ocDateConfirmed = String(body.ocDateConfirmed || '').trim();
+        const arrivalDate = String(body.arrivalDate || '').trim();
+        const arrivalMeridiem = normalizeManualOcArrivalMeridiem(body.arrivalMeridiem);
+        const uploadedBy = String(body.uploadedBy || '').trim();
+
+        if (!manualOcId) {
+            return res.status(400).json({
+                success: false,
+                error: 'manualOcId es requerido'
+            });
+        }
+
+        const record = await findManualOcRecord(manualOcId);
+        if (!record) {
+            return res.status(404).json({
+                success: false,
+                error: `No existe registro manual OC (${manualOcId})`
+            });
+        }
+
+        const profile = getManualOcClientProfile(record.sourceClientCode);
+        if (!profile) {
+            return res.status(400).json({
+                success: false,
+                error: `sourceClientCode no soportado: ${record.sourceClientCode}`
+            });
+        }
+
+        const confirmedDate = parseManualDateCandidate(ocDateConfirmed || record.ocDateDetected);
+        if (!confirmedDate) {
+            return res.status(400).json({
+                success: false,
+                error: 'ocDateConfirmed invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+            });
+        }
+
+        let dispatchContext = record?.dispatchContext || null;
+        if (!dispatchContext) {
+            try {
+                const resolvedContext = await ensureManualOcDispatchContext({
+                    manualOcId,
+                    record,
+                    profile,
+                    uploadedBy,
+                    ocDateConfirmed: confirmedDate
+                });
+                dispatchContext = resolvedContext.dispatchContext;
+            } catch (contextError) {
+                console.warn('No se pudo cargar dispatchContext para cutoff en submit manual OC:', contextError?.message || contextError);
+            }
+        }
+
+        const cutoffHourForDispatch = resolveManualOcDispatchCutoffHour({
+            clientData: dispatchContext?.clientData || {},
+            emailData: dispatchContext?.emailData || {}
+        });
+        const arrivalInfo = buildManualOcArrivalDateTime({
+            arrivalDate: arrivalDate || confirmedDate,
+            arrivalMeridiem,
+            fallbackDate: confirmedDate,
+            cutoffHourOverride: cutoffHourForDispatch
+        });
+        if (!arrivalInfo) {
+            return res.status(400).json({
+                success: false,
+                error: 'arrivalDate invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+            });
+        }
+
+        const emailDateToUse = arrivalInfo.dateTimeIso;
+        const payload = buildManualReadEmailPayload({
+            manualOcId,
+            profile,
+            fileName: record?.fileMeta?.fileName || 'manual_oc.xlsx',
+            excelText: record.excelText || '',
+            emailDate: emailDateToUse,
+            uploadedBy: uploadedBy || record.uploadedBy
+        });
+
+        await updateManualOcRecord(manualOcId, {
+            status: 'submit_processing',
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem,
+            submitRequestedBy: uploadedBy || record.uploadedBy
+        });
+        await appendManualOcTimeline(manualOcId, {
+            event: 'submit_requested',
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem
+        });
+
+        const parserResponse = await runReadEmailBodyPayload(payload);
+        const parserSuccess = parserResponse.status >= 200 && parserResponse.status < 300;
+
+        if (!parserSuccess) {
+            await updateManualOcRecord(manualOcId, {
+                status: 'submit_failed_parser',
+                submitParserStatusCode: parserResponse.status,
+                submitParserResponseBody: parserResponse.body
+            });
+            await appendManualOcTimeline(manualOcId, {
+                event: 'submit_failed_parser',
+                statusCode: parserResponse.status
+            });
+
+            return res.status(422).json({
+                success: false,
+                error: 'El parser no pudo construir merged valido para submit',
+                parser: {
+                    status: parserResponse.status,
+                    body: parserResponse.body
+                }
+            });
+        }
+
+        const makeResult = await sendManualMergedToMake({
+            manualOcId,
+            profile,
+            mergedResult: parserResponse.body,
+            ocDateDetected: record.ocDateDetected || null,
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem,
+            arrivalDateTime: arrivalInfo.dateTimeIso,
+            uploadedBy: uploadedBy || record.uploadedBy,
+            fileMeta: record.fileMeta || null
+        });
+
+        const finalStatus = makeResult.delivered
+            ? 'submitted_to_make'
+            : (makeResult.skipped ? 'submit_skipped_make' : 'submit_failed_make');
+
+        await updateManualOcRecord(manualOcId, {
+            status: finalStatus,
+            submitParserStatusCode: parserResponse.status,
+            submitParserResponseBody: parserResponse.body,
+            makeResult
+        });
+        await appendManualOcTimeline(manualOcId, {
+            event: finalStatus,
+            makeStatus: makeResult.status || null,
+            makeDelivered: makeResult.delivered === true
+        });
+
+        const statusCode = makeResult.delivered || makeResult.skipped ? 200 : 502;
+        return res.status(statusCode).json({
+            success: makeResult.delivered || makeResult.skipped,
+            manualOcId,
+            sourceClientCode: profile.sourceClientCode,
+            parserProfile: profile.parserProfile,
+            ocDateDetected: record.ocDateDetected || null,
+            ocDateConfirmed: confirmedDate,
+            arrivalDate: arrivalInfo.date,
+            arrivalMeridiem: arrivalInfo.meridiem,
+            arrivalDateTime: arrivalInfo.dateTimeIso,
+            parser: {
+                status: parserResponse.status,
+                body: parserResponse.body
+            },
+            make: makeResult
+        });
+    } catch (error) {
+        console.error('Error en readManualOcSubmit:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'No se pudo completar submit manual OC',
+            details: error?.message || String(error)
+        });
+    }
+}
+
 async function readEmailBodyFromGmail(req, res) {
     const requestBody = req.body || {};
     const messageId = typeof requestBody === 'string' ? requestBody.trim() : requestBody.messageId;
@@ -1794,7 +3617,11 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
                                 emailDate,
                                 getRegionFromClientRecord(results[0])
                             )
-                            : findDeliveryDayByComuna(results[0]['Comuna Despacho'], emailDate);
+                            : findDeliveryDayByComuna(
+                                results[0]['Comuna Despacho'],
+                                emailDate,
+                                getRegionFromClientRecord(results[0])
+                            );
                         if (deliveryDay != null) {
                             results[0]['deliveryDay'] = `${deliveryDay}`;
                         } else {
@@ -1885,7 +3712,11 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
                             emailDate,
                             getRegionFromClientRecord(found)
                         )
-                        : findDeliveryDayByComuna(found['Comuna Despacho'], emailDate);
+                        : findDeliveryDayByComuna(
+                            found['Comuna Despacho'],
+                            emailDate,
+                            getRegionFromClientRecord(found)
+                        );
 
                     if (deliveryDay != null) {
                         found['deliveryDay'] = `${deliveryDay}`;
@@ -1910,7 +3741,15 @@ async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, email
 }
 
 
-export { readCSV, readEmailBody, readEmailBodyFromGmail };
+export {
+    readCSV,
+    readEmailBody,
+    readEmailBodyFromGmail,
+    readManualOcExtractDate,
+    readManualOcPreview,
+    readManualOcDispatchPreview,
+    readManualOcSubmit
+};
 
 
 

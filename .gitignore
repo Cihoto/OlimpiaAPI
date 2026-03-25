@@ -12,3 +12,8 @@ src/documents/ASDASDASDAS.csv
 /mock
 /scripts
 /src/tools/deliveryVisibilityReport.js
+
+# Codex local config
+/.codex/
+/AGENTS.md
+/instructions/codex-subagents.md

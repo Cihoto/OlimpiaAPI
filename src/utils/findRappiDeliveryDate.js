@@ -116,7 +116,7 @@ function findRappiDeliveryDayByComuna(comunaToSearch, emailDate, region) {
 
     if (!isSantiagoRegion(region, comunaToSearch)) {
         // For regions keep the existing calendarization behavior.
-        return findDeliveryDayByComuna(comunaToSearch, emailDate);
+        return findDeliveryDayByComuna(comunaToSearch, emailDate, region);
     }
 
     const isTuesdayThursday = isTuesdayThursdayComuna(comunaToSearch);

@@ -27,9 +27,9 @@ const app = express();
 dotenv.config();
 
 // Middlewares
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '25mb' }));
 // Middleware para procesar texto plano
-app.use(express.text());
+app.use(express.text({ limit: '25mb' }));
 app.use(morgan('dev'));
 app.use(cors());
 
