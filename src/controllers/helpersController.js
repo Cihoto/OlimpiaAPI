@@ -3546,13 +3546,13 @@ function getRegionFromClientRecord(record) {
 
 async function integrateWithChatGPT(addresses, targetAddress) {
 
-    const prompt = `Busca dentro de este arreglo ${JSON.stringify(addresses)} la mejor coincidencia para la direcciÃ³n "${targetAddress}".
-    En caso de encontrar una coincidencia, devolver un array JSON con el objeto que contenga la direcciÃ³n agregando "match": true.
+    const prompt = `Busca dentro de este arreglo ${JSON.stringify(addresses)} la mejor coincidencia para la dirección "${targetAddress}".
+    En caso de encontrar una coincidencia, devolver un array JSON con el objeto que contenga la dirección agregando "match": true.
     En caso de no encontrar coincidencias, devolver un array vacio. En caso de tener coincidencias, devolver solo un elemento.
     [no prose] [Output only JSON]`;
 
     const response = await client.responses.create({
-        model: "gpt-4o-mini",
+        model: "gpt-5-mini",
         input: prompt
     });
 
