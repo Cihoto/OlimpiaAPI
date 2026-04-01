@@ -50,6 +50,10 @@ const REGIONAL_BIWEEKLY_SCHEDULES = Object.freeze({
     })
 });
 
+const BLOCKED_DELIVERY_DATES = new Set([
+    '2026-04-03' // Viernes Santo (Chile)
+]);
+
 const COMUNA_REGION_SCHEDULE_OVERRIDES = new Map([
     ['curacavi', 'V'],
     ['buin', 'VI'],
@@ -86,6 +90,18 @@ function getEmailMoment(emailDate) {
         return parsed;
     }
     return moment.tz(CHILE_TIMEZONE);
+}
+
+function isBlockedDeliveryDate(dateValue) {
+    if (!dateValue) {
+        return false;
+    }
+
+    const normalizedDate = moment.isMoment(dateValue)
+        ? dateValue.format('YYYY-MM-DD')
+        : String(dateValue).trim().slice(0, 10);
+
+    return BLOCKED_DELIVERY_DATES.has(normalizedDate);
 }
 
 function resolveRegionalScheduleCode(comunaToSearch, region) {
@@ -129,6 +145,12 @@ function findNextBiweeklyRegionalDeliveryDay(scheduleCode, emailMoment) {
         if (diffToCandidate === 1) {
             candidate.add(14, 'days');
         }
+    }
+
+    let holidayGuard = 0;
+    while (isBlockedDeliveryDate(candidate) && holidayGuard < 6) {
+        candidate.add(14, 'days');
+        holidayGuard += 1;
     }
 
     return candidate.format('YYYY-MM-DD');
@@ -343,7 +365,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate, region = '') {
 
         for (let offset = 1; offset <= 14; offset++) {
             const candidate = emailMoment.clone().add(offset, 'day');
-            if (deliveryDayIndexSet.has(candidate.day())) {
+            if (deliveryDayIndexSet.has(candidate.day()) && !isBlockedDeliveryDate(candidate)) {
                 upcomingDeliveries.push(candidate);
             }
         }
