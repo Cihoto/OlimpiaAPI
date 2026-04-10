@@ -2037,7 +2037,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             String(sender || '').toLowerCase() === KEY_LOGISTICS_SENDER;
         const isRappiTurboGmail =
             source === 'gmail' &&
-            String(sender || '').toLowerCase() === RAPPI_TURBO_SENDER;
+            (String(sender || '').toLowerCase().endsWith('@rappi.com') || String(sender || '').toLowerCase().endsWith('@rappi.cl'));
         const keyLogisticsFixedClientData =
             isKeyLogisticsGmail && keyLogisticsData?.clientId
                 ? buildKeyLogisticsClientData(
@@ -3111,18 +3111,19 @@ async function readEmailBodyFromGmail(req, res) {
 
         const headers = headersToMap(message.data?.payload?.headers || []);
         const sender = extractEmailAddress(headers.From || '').toLowerCase();
+        const isRappiSender = String(sender || '').toLowerCase().endsWith('@rappi.com') || String(sender || '').toLowerCase().endsWith('@rappi.cl');
         const allowedSenders = new Set([
             PEDIDOS_YA_SENDER,
-            KEY_LOGISTICS_SENDER,
-            RAPPI_TURBO_SENDER
+            KEY_LOGISTICS_SENDER
         ]);
 
-        if (!allowedSenders.has(sender)) {
+        if (!allowedSenders.has(sender) && !isRappiSender) {
             return res.status(403).json({
                 success: false,
                 error: 'Emisor no permitido',
                 sender,
-                allowedSenders: Array.from(allowedSenders)
+                allowedSenders: Array.from(allowedSenders),
+                isRappiSender
             });
         }
 
@@ -3275,7 +3276,7 @@ async function readEmailBodyFromGmail(req, res) {
             });
         }
 
-        if (sender === RAPPI_TURBO_SENDER) {
+        if (isRappiSender) {
             const pdfAttachments = findPdfAttachments(message.data?.payload);
             if (pdfAttachments.length === 0) {
                 return res.status(400).json({

@@ -359,6 +359,12 @@ async function createBill(req, res) {
         bill.validate();
         const BILLJSON = await bill.toJSON();
 
+        return res.json({
+            success: true,
+            data: BILLJSON,
+            deliveryReservation: deliveryReservationInBilling
+        });
+
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("+++++++++++++++++++++++JSON DE DOUCMENTO PARA DEFONTANA+++++++++++++++++++++++");
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
