@@ -359,8 +359,6 @@ async function createBill(req, res) {
         bill.validate();
         const BILLJSON = await bill.toJSON();
 
-    
-
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
         console.log("+++++++++++++++++++++++JSON DE DOUCMENTO PARA DEFONTANA+++++++++++++++++++++++");
         console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
