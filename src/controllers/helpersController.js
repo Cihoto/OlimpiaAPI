@@ -2310,7 +2310,11 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             "OC_date": moment().format('DD-MM-YYYY'),
             "emailDate": moment(emailDate, moment.ISO_8601, true).isValid() ? formattedEmailDate : emailDate,
             "hasMatch": true,
-            "form_order": /ENX_ORD_\d+/.test(String(emailSubject || '')),
+            "order_origin": (() => {
+                if (/ENX_ORD_\d+/.test(String(emailSubject || ''))) return 'Form';
+                if (source === 'manual_portal') return 'OC Loader';
+                return 'Email';
+            })(),
         };
 
         const deliveryReservation = await reserveRmDeliveryCapacity({
