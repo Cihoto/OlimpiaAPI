@@ -27,6 +27,29 @@ const EMPTY_ORDER_QUANTITIES = {
     Pedido_Cantidad_Leche_90g: 0
 };
 
+const PEDIDOS_YA_PRODUCT_CODE_ENTRIES = [
+    { code: 'Z69NYT', key: 'Pedido_Cantidad_Leche', unitsPerBox: 24 },
+    { code: 'SAAKWF', key: 'Pedido_Cantidad_Free', unitsPerBox: 24 },
+    { code: 'T4YJXL', key: 'Pedido_Cantidad_Amargo', unitsPerBox: 24 },
+    { code: '7YZH72', key: 'Pedido_Cantidad_Pink', unitsPerBox: 24 },
+    { code: '07798147783223', key: 'Pedido_Cantidad_Leche', unitsPerBox: 24 },
+    { code: '7798147783223', key: 'Pedido_Cantidad_Leche', unitsPerBox: 24 },
+    { code: '07798147784442', key: 'Pedido_Cantidad_Free', unitsPerBox: 24 },
+    { code: '7798147784442', key: 'Pedido_Cantidad_Free', unitsPerBox: 24 },
+    { code: '07798147780062', key: 'Pedido_Cantidad_Amargo', unitsPerBox: 24 },
+    { code: '7798147780062', key: 'Pedido_Cantidad_Amargo', unitsPerBox: 24 },
+    { code: '07798147784008', key: 'Pedido_Cantidad_Pink', unitsPerBox: 24 },
+    { code: '7798147784008', key: 'Pedido_Cantidad_Pink', unitsPerBox: 24 }
+];
+
+const PEDIDOS_YA_PRODUCT_CODE_MAP = PEDIDOS_YA_PRODUCT_CODE_ENTRIES.reduce((acc, entry) => {
+    acc[entry.code] = {
+        key: entry.key,
+        unitsPerBox: entry.unitsPerBox
+    };
+    return acc;
+}, {});
+
 function normalizeText(value) {
     if (!value) {
         return '';
@@ -50,6 +73,37 @@ function parseNumber(value) {
     }
     const num = Number(cleaned);
     return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeProductCode(value) {
+    return String(value || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .trim();
+}
+
+function expandProductCodeCandidates(rawCode) {
+    const normalized = normalizeProductCode(rawCode);
+    if (!normalized) {
+        return [];
+    }
+    const variants = [normalized];
+    if (/^\d+$/.test(normalized)) {
+        variants.push(normalized.replace(/^0+/, ''));
+    }
+    return Array.from(new Set(variants.filter(Boolean)));
+}
+
+function resolveProductMappingByCodes(codes = []) {
+    for (const code of codes) {
+        const candidates = expandProductCodeCandidates(code);
+        for (const candidate of candidates) {
+            if (PEDIDOS_YA_PRODUCT_CODE_MAP[candidate]) {
+                return PEDIDOS_YA_PRODUCT_CODE_MAP[candidate];
+            }
+        }
+    }
+    return null;
 }
 
 const PRODUCT_GROUPS = [
@@ -173,6 +227,9 @@ function parsePedidosYaExcelText(text) {
     const descIdx = normalizedCols.findIndex((col) => col.includes('descripcion'));
     const cajasIdx = normalizedCols.findIndex((col) => col.includes('cantidad') && col.includes('cajas'));
     const unidadesIdx = normalizedCols.findIndex((col) => col.includes('cantidad') && col.includes('unidades'));
+    const skuIdx = normalizedCols.findIndex((col) => col === 'sku' || col.includes('sku'));
+    const eanIdx = normalizedCols.findIndex((col) => col === 'ean' || col.includes('ean'));
+    const internalCodeIdx = normalizedCols.findIndex((col) => col.includes('codigo') && col.includes('interno'));
 
     if (descIdx === -1 || (cajasIdx === -1 && unidadesIdx === -1)) {
         return null;
@@ -185,7 +242,12 @@ function parsePedidosYaExcelText(text) {
         }
 
         const description = row[descIdx];
-        const key = classifyProduct(description);
+        const mappingByCode = resolveProductMappingByCodes([
+            skuIdx !== -1 ? row[skuIdx] : null,
+            eanIdx !== -1 ? row[eanIdx] : null,
+            internalCodeIdx !== -1 ? row[internalCodeIdx] : null
+        ]);
+        const key = mappingByCode?.key || classifyProduct(description);
         if (!key) {
             continue;
         }
@@ -195,7 +257,7 @@ function parsePedidosYaExcelText(text) {
 
         let boxes = cajas;
         if (!boxes && unidades) {
-            const boxSize = key.includes('_90g') ? 18 : 24;
+            const boxSize = mappingByCode?.unitsPerBox || (key.includes('_90g') ? 18 : 24);
             if (unidades % boxSize === 0) {
                 boxes = unidades / boxSize;
             }
@@ -210,6 +272,101 @@ function parsePedidosYaExcelText(text) {
     return hasMatch ? quantities : null;
 }
 
+function parseBoxesFromUnitsChunk(unitsChunk, unitsPerBox) {
+    const digits = String(unitsChunk || '').replace(/\D/g, '');
+    if (!digits) {
+        return 0;
+    }
+
+    const parsedUnitsPerBox = Number(unitsPerBox);
+    if (Number.isFinite(parsedUnitsPerBox) && parsedUnitsPerBox > 0 && digits.length >= 2) {
+        const maxBoxDigits = Math.min(3, digits.length - 1);
+        for (let boxDigits = 1; boxDigits <= maxBoxDigits; boxDigits += 1) {
+            const boxes = Number(digits.slice(0, boxDigits));
+            const units = Number(digits.slice(boxDigits));
+            if (!Number.isFinite(boxes) || !Number.isFinite(units) || boxes <= 0 || units <= 0) {
+                continue;
+            }
+            if (units % parsedUnitsPerBox === 0 && (units / parsedUnitsPerBox) === boxes) {
+                return boxes;
+            }
+        }
+    }
+
+    if (digits.length <= 2) {
+        const boxes = parseNumber(digits);
+        return boxes > 0 ? boxes : 0;
+    }
+
+    return 0;
+}
+
+function parsePedidosYaPdfText(text) {
+    const quantities = { ...EMPTY_ORDER_QUANTITIES };
+    let hasMatch = false;
+    const lines = String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    for (const rawLine of lines) {
+        const compactLine = rawLine.replace(/\s+/g, '');
+        const rowMatch = compactLine.match(/^([A-Z0-9]{6})(\d{12,14})(.+)$/);
+        if (!rowMatch) {
+            continue;
+        }
+
+        const sku = rowMatch[1];
+        const ean = rowMatch[2];
+        const rowTail = rowMatch[3];
+
+        const mappingByCode = resolveProductMappingByCodes([sku, ean]);
+        if (!mappingByCode) {
+            continue;
+        }
+
+        const unitsChunkMatch = rowTail.match(/(\d{2,7})(?=\d{1,3}(?:[.,]\d{3})+[.,]\d{2}\$?)/);
+        if (!unitsChunkMatch) {
+            continue;
+        }
+
+        const boxes = parseBoxesFromUnitsChunk(unitsChunkMatch[1], mappingByCode.unitsPerBox);
+        if (!boxes) {
+            continue;
+        }
+
+        quantities[mappingByCode.key] += boxes;
+        hasMatch = true;
+    }
+
+    return hasMatch ? quantities : null;
+}
+
+function detectPedidosYaAttachmentType(payload) {
+    const attachmentFilename = String(payload?.attachmentFilename || '').toLowerCase();
+    const mimeType = String(payload?.mimeType || payload?.attachmentMimeType || '').toLowerCase();
+    const attachedText = String(payload?.emailAttached || '');
+    const normalizedSnippet = normalizeText(attachedText.slice(0, 2500));
+
+    if (attachmentFilename.endsWith('.pdf') || mimeType.includes('pdf')) {
+        return 'pdf';
+    }
+
+    if (/\.xlsx?$/i.test(attachmentFilename) || mimeType.includes('spreadsheetml') || mimeType.includes('ms-excel')) {
+        return 'excel';
+    }
+
+    if (attachedText.includes('\t') && normalizedSnippet.includes('descripcion')) {
+        return 'excel';
+    }
+
+    if (normalizedSnippet.includes('n sku') && normalizedSnippet.includes('cantidad cajas')) {
+        return 'pdf';
+    }
+
+    return 'unknown';
+}
+
 function parsePedidosYaOrderQuantities(emailContent) {
     try {
         const payload = JSON.parse(emailContent);
@@ -220,7 +377,16 @@ function parsePedidosYaOrderQuantities(emailContent) {
         if (!emailAttached || typeof emailAttached !== 'string') {
             return null;
         }
-        return parsePedidosYaExcelText(emailAttached);
+
+        const attachmentType = detectPedidosYaAttachmentType(payload);
+        if (attachmentType === 'pdf') {
+            return parsePedidosYaPdfText(emailAttached) || parsePedidosYaExcelText(emailAttached);
+        }
+        if (attachmentType === 'excel') {
+            return parsePedidosYaExcelText(emailAttached) || parsePedidosYaPdfText(emailAttached);
+        }
+
+        return parsePedidosYaExcelText(emailAttached) || parsePedidosYaPdfText(emailAttached);
     } catch (error) {
         return null;
     }

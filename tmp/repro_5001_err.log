@@ -1,0 +1,28 @@
+SyntaxError: Expected property name or '}' in JSON at position 1
+    at JSON.parse (<anonymous>)
+    at parse (C:\OLIMPIA\olimpia_API\node_modules\body-parser\lib\types\json.js:92:19)
+    at C:\OLIMPIA\olimpia_API\node_modules\body-parser\lib\read.js:128:18
+    at AsyncResource.runInAsyncScope (node:async_hooks:206:9)
+    at invokeCallback (C:\OLIMPIA\olimpia_API\node_modules\raw-body\index.js:238:16)
+    at done (C:\OLIMPIA\olimpia_API\node_modules\raw-body\index.js:227:7)
+    at IncomingMessage.onEnd (C:\OLIMPIA\olimpia_API\node_modules\raw-body\index.js:287:7)
+    at IncomingMessage.emit (node:events:519:28)
+    at endReadableNT (node:internal/streams/readable:1696:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:82:21)
+file:///C:/OLIMPIA/olimpia_API/src/controllers/helpersController.js:4400
+    rut = rut.replace(/[^0-9kK]/g, '');
+              ^
+
+TypeError: Cannot read properties of undefined (reading 'replace')
+    at normalizeRut (file:///C:/OLIMPIA/olimpia_API/src/controllers/helpersController.js:4400:15)
+    at readCSV (file:///C:/OLIMPIA/olimpia_API/src/controllers/helpersController.js:589:27)
+    at Layer.handle [as handle_request] (C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\layer.js:95:5)
+    at next (C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\route.js:149:13)
+    at Route.dispatch (C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\route.js:119:3)
+    at Layer.handle [as handle_request] (C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\layer.js:95:5)
+    at C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\index.js:284:15
+    at Function.process_params (C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\index.js:346:12)
+    at next (C:\OLIMPIA\olimpia_API\node_modules\express\lib\router\index.js:280:10)
+    at expressInit (C:\OLIMPIA\olimpia_API\node_modules\express\lib\middleware\init.js:40:5)
+
+Node.js v20.18.0

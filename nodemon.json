@@ -1,0 +1,13 @@
+{
+  "watch": [
+    "src",
+    "index.js"
+  ],
+  "ext": "js,mjs,cjs,json",
+  "ignore": [
+    "temp/**",
+    "tmp/**",
+    "coverage/**",
+    "*.log"
+  ]
+}

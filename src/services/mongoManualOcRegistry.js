@@ -29,6 +29,10 @@ async function getCollection() {
         await collection.createIndex({ manualOcId: 1 }, { unique: true });
         await collection.createIndex({ status: 1, createdAt: -1 });
         await collection.createIndex({ sourceClientCode: 1, createdAt: -1 });
+        await collection.createIndex(
+            { sourceClientCode: 1, detectedOrderNumber: 1, createdAt: -1 },
+            { partialFilterExpression: { detectedOrderNumber: { $exists: true, $type: 'string' } } }
+        );
         indexesReady = true;
     }
 
@@ -91,9 +95,34 @@ async function appendManualOcTimeline(manualOcId, event) {
     );
 }
 
+async function findLatestManualOcByDetectedOrderNumber({
+    sourceClientCode,
+    detectedOrderNumber,
+    statuses = []
+}) {
+    const safeSourceClientCode = String(sourceClientCode || '').trim().toUpperCase();
+    const safeDetectedOrderNumber = String(detectedOrderNumber || '').trim().toUpperCase();
+    if (!safeSourceClientCode || !safeDetectedOrderNumber) {
+        return null;
+    }
+
+    const collection = await getCollection();
+    const filter = {
+        sourceClientCode: safeSourceClientCode,
+        detectedOrderNumber: safeDetectedOrderNumber
+    };
+
+    if (Array.isArray(statuses) && statuses.length > 0) {
+        filter.status = { $in: statuses };
+    }
+
+    return collection.find(filter).sort({ createdAt: -1 }).limit(1).next();
+}
+
 export {
     createManualOcRecord,
     findManualOcRecord,
     updateManualOcRecord,
-    appendManualOcTimeline
+    appendManualOcTimeline,
+    findLatestManualOcByDetectedOrderNumber
 };

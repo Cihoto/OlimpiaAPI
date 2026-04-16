@@ -12,7 +12,8 @@ import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
 import {
     analyzeOrderEmail,
     analyzeOrderEmailFromGmail,
-    extractPedidosYaOrderNumber
+    extractPedidosYaOrderNumber,
+    parsePedidosYaOrderQuantities
 } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
 import { parseRappiTurboOrderText } from '../services/rappiTurboOrderParser.js';
@@ -27,7 +28,8 @@ import {
     createManualOcRecord,
     findManualOcRecord,
     updateManualOcRecord,
-    appendManualOcTimeline
+    appendManualOcTimeline,
+    findLatestManualOcByDetectedOrderNumber
 } from '../services/mongoManualOcRegistry.js';
 import {
     buildGmailClient,
@@ -38,6 +40,12 @@ import {
     findPdfAttachments,
     headersToMap
 } from '../utils/Google/gmail.js';
+
+function isManualOcDeveloperFlagEnabled(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y', 'si', 'sÃ­', 'on'].includes(normalized);
+}
+
 const client = new OpenAI();
 const KEY_LOGISTICS_BLOCKED_RUTS = new Set(['77.419.327-8', '96.930.440-6']);
 const KEY_LOGISTICS_FIXED_RUT = '96.930.440-6';
@@ -45,6 +53,11 @@ const KEY_LOGISTICS_SENDER = 'fax@keylogistics.cl';
 const PEDIDOS_YA_SENDER = 'compras.marketds@pedidosya.com';
 const RAPPI_TURBO_SENDER = 'tomas.bravo@rappi.com';
 const MAKE_MANUAL_OC_WEBHOOK_URL = process.env.MAKE_MANUAL_OC_WEBHOOK_URL || '';
+const MANUAL_OC_DEVELOPER_MODE_DEFAULT = isManualOcDeveloperFlagEnabled(
+    process.env.MANUAL_OC_DEVELOPER_MODE || process.env.MANUAL_OC_DEV_MODE || ''
+);
+const MANUAL_OC_DEVELOPER_OUTBOX_DIR = process.env.MANUAL_OC_DEVELOPER_OUTBOX_DIR
+    || path.resolve(process.cwd(), 'temp', 'manual_oc_developer_outbox');
 
 const MANUAL_OC_CLIENT_PROFILES = Object.freeze({
     PEYA: Object.freeze({
@@ -61,6 +74,11 @@ const MANUAL_OC_DEFAULT_SHOP_ID = 'Local';
 const MANUAL_OC_DEFAULT_PRICE_LIST = '1';
 const MANUAL_OC_DEFAULT_DOCUMENT_TYPE = 'FVAELECT';
 const MANUAL_OC_DISPATCH_CUTOFF_HOUR = Number.parseInt(process.env.MANUAL_OC_DISPATCH_CUTOFF_HOUR || '12', 10);
+const MANUAL_OC_PROCESSED_STATUSES = Object.freeze([
+    'submit_processing',
+    'submitted_to_make',
+    'submit_skipped_make'
+]);
 
 const MANUAL_OC_DETAIL_MAPPING = Object.freeze([
     Object.freeze({ quantityKey: 'Pedido_Cantidad_Amargo', code: '17798147780069', priceBucket: '150' }),
@@ -70,6 +88,273 @@ const MANUAL_OC_DETAIL_MAPPING = Object.freeze([
     Object.freeze({ quantityKey: 'Pedido_Cantidad_Leche_90g', code: '70724043633550', priceBucket: '90' }),
     Object.freeze({ quantityKey: 'Pedido_Cantidad_Free', code: '70724043633551', priceBucket: 'free' })
 ]);
+
+function normalizeManualOcOrderNumber(value) {
+    const normalized = String(value || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .trim();
+
+    if (!normalized) {
+        return null;
+    }
+
+    const withPrefix = normalized.startsWith('PO') ? normalized : `PO${normalized}`;
+    return /^PO\d{5,}$/.test(withPrefix) ? withPrefix : null;
+}
+
+function extractManualOcOrderNumber({ fileName, text }) {
+    const extracted = extractPedidosYaOrderNumber({
+        attachmentFilename: fileName,
+        emailAttached: text,
+        emailSubject: '',
+        emailBody: ''
+    });
+
+    return normalizeManualOcOrderNumber(extracted);
+}
+
+function normalizeSkuLikeValue(value) {
+    return String(value || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .trim();
+}
+
+function parsePeyaPdfItems(text) {
+    const lines = String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const items = [];
+
+    for (const rawLine of lines) {
+        const compactLine = rawLine.replace(/\s+/g, '');
+        const rowMatch = compactLine.match(/^([A-Z0-9]{6})(\d{12,14})(.+)$/);
+        if (!rowMatch) {
+            continue;
+        }
+
+        const sku = rowMatch[1];
+        const ean = rowMatch[2];
+        const rowTail = rowMatch[3];
+        const unitsChunkMatch = rowTail.match(/(\d{2,7})(?=\d{1,3}(?:[.,]\d{3})+[.,]\d{2}\$?)/);
+        if (!unitsChunkMatch) {
+            continue;
+        }
+
+        const digits = String(unitsChunkMatch[1] || '').replace(/\D/g, '');
+        let quantityBoxes = 0;
+        let quantityUnits = 0;
+        if (digits.length >= 2) {
+            const maxBoxDigits = Math.min(3, digits.length - 1);
+            for (let boxDigits = 1; boxDigits <= maxBoxDigits; boxDigits += 1) {
+                const boxes = Number(digits.slice(0, boxDigits));
+                const units = Number(digits.slice(boxDigits));
+                if (!Number.isFinite(boxes) || !Number.isFinite(units) || boxes <= 0 || units <= 0) {
+                    continue;
+                }
+                if (units % 24 === 0 && (units / 24) === boxes) {
+                    quantityBoxes = boxes;
+                    quantityUnits = units;
+                    break;
+                }
+            }
+        } else if (digits.length > 0) {
+            quantityBoxes = Number(digits);
+            quantityUnits = quantityBoxes > 0 ? quantityBoxes * 24 : 0;
+        }
+
+        const moneyMatches = [...rowTail.matchAll(/(\d{1,3}(?:[.,]\d{3})+[.,]\d{2})\$/g)].map((match) => match[1]);
+        let unitCost = parseNumberish(moneyMatches[0] || null);
+        const costExclIva = parseNumberish(moneyMatches[1] || null);
+        const costIncIva = parseNumberish(moneyMatches[2] || null);
+
+        if (quantityUnits > 0 && costExclIva > 0 && (unitCost <= 0 || unitCost > costExclIva)) {
+            unitCost = Math.round((costExclIva / quantityUnits) * 1000) / 1000;
+        }
+
+        const description = rowTail
+            .slice(0, unitsChunkMatch.index)
+            .replace(/\s+/g, ' ')
+            .trim() || null;
+
+        items.push({
+            sku: sku || null,
+            ean: ean || null,
+            description,
+            quantityBoxes: quantityBoxes || null,
+            quantityUnits: quantityUnits || null,
+            unitCost: unitCost > 0 ? unitCost : null,
+            costExclIva: costExclIva > 0 ? costExclIva : null,
+            costIncIva: costIncIva > 0 ? costIncIva : null
+        });
+    }
+
+    return items;
+}
+
+function extractPeyaPdfAnalysis(text) {
+    const sourceText = String(text || '');
+    if (!sourceText.trim()) {
+        return null;
+    }
+
+    const pick = (regex) => {
+        const match = sourceText.match(regex);
+        return match && match[1] ? String(match[1]).replace(/\s+/g, ' ').trim() : null;
+    };
+
+    const purchaseOrderNumber = normalizeManualOcOrderNumber(
+        pick(/\b(PO\d{5,})\b/i)
+    );
+
+    const items = parsePeyaPdfItems(sourceText);
+    const quantityBoxesTotal = items.reduce((acc, item) => acc + (item.quantityBoxes || 0), 0);
+    const quantityUnitsTotal = items.reduce((acc, item) => acc + (item.quantityUnits || 0), 0);
+    const costExclIvaTotal = items.reduce((acc, item) => acc + (item.costExclIva || 0), 0);
+    const costIncIvaTotal = items.reduce((acc, item) => acc + (item.costIncIva || 0), 0);
+
+    return {
+        pattern: 'peya_pdf_oc_v1',
+        purchaseOrderNumber,
+        metadata: {
+            store: pick(/Store:\s*([\s\S]*?)(?=Proveedor:|\n|\t|$)/i),
+            proveedor: pick(/Proveedor:\s*([\s\S]*?)(?=Razon Social:|\n|\t|$)/i),
+            razonSocial: pick(/Razon Social:\s*([\s\S]*?)(?=RUT:|\n|\t|$)/i),
+            rut: pick(/RUT:\s*([0-9.\-kK]+)/i),
+            direccionEntrega: pick(/Direccion entrega:\s*([\s\S]*?)(?=Fecha entrega:|\n|\t|$)/i),
+            provincia: pick(/Provincia:\s*([\s\S]*?)(?=Fecha venc\. PO:|\n|\t|$)/i),
+            pais: pick(/Pais:\s*([\s\S]*?)(?=Contacto encargado tienda:|\n|\t|$)/i),
+            horarioRecepcion: pick(/Horario\s*Recepcion:\s*([\s\S]*?)(?=P Market|\n{2,}|$)/i),
+            contactoEncargadoTienda: pick(/Contacto encargado tienda:\s*([\s\S]*?)(?=Costo total Inc\. IVA|\n|\t|$)/i)
+        },
+        dates: {
+            fechaEmision: parseManualDateCandidate(pick(/Fecha emision:\s*([\s\S]*?)(?=Costo total Excl\. IVA|\n|\t|$)/i)),
+            fechaEntrega: parseManualDateCandidate(pick(/Fecha entrega:\s*([\s\S]*?)(?=Provincia:|\n|\t|$)/i)),
+            fechaVencimientoPo: parseManualDateCandidate(pick(/Fecha venc\. PO:\s*([\s\S]*?)(?=IVA|\n|\t|$)/i))
+        },
+        totals: {
+            costoTotalExclIva: parseNumberish(pick(/Costo total Excl\. IVA\s*([0-9.,]+)\$?/i)),
+            ivaTotal: parseNumberish(pick(/Fecha venc\. PO:[\s\S]*?IVA\s*([0-9.,]+)\$?/i)),
+            costoTotalIncIva: parseNumberish(pick(/Costo total Inc\. IVA\s*([0-9.,]+)\$?/i))
+        },
+        items,
+        itemStats: {
+            count: items.length,
+            quantityBoxesTotal: Math.round(quantityBoxesTotal * 1000) / 1000,
+            quantityUnitsTotal: Math.round(quantityUnitsTotal * 1000) / 1000,
+            costExclIvaTotal: Math.round(costExclIvaTotal * 1000) / 1000,
+            costIncIvaTotal: Math.round(costIncIvaTotal * 1000) / 1000
+        }
+    };
+}
+
+function buildManualOcPayloadForQuantities({ fileName, mimeType, text }) {
+    return JSON.stringify({
+        attachmentFilename: String(fileName || ''),
+        mimeType: String(mimeType || ''),
+        emailAttached: String(text || ''),
+        emailBody: '',
+        emailSubject: ''
+    });
+}
+
+function buildManualOcComparableSnapshot({
+    detectedOrderNumber,
+    quantities,
+    excelAnalysis,
+    pdfAnalysis
+}) {
+    const analysis = excelAnalysis || pdfAnalysis || {};
+    const totals = analysis?.totals || {};
+    const items = Array.isArray(analysis?.items) ? analysis.items : [];
+
+    const normalizedItems = items
+        .map((item) => ({
+            sku: normalizeSkuLikeValue(item?.sku),
+            ean: (() => {
+                const digits = String(item?.ean || '').replace(/\D/g, '');
+                if (!digits) {
+                    return normalizeSkuLikeValue(item?.ean);
+                }
+                const withoutLeadingZeros = digits.replace(/^0+/, '');
+                return withoutLeadingZeros || digits;
+            })(),
+            quantityBoxes: toPositiveInteger(item?.quantityBoxes),
+            quantityUnits: toPositiveInteger(item?.quantityUnits),
+            costExclIva: Math.round(parseNumberish(item?.costExclIva || 0)),
+            costIncIva: Math.round(parseNumberish(item?.costIncIva || 0))
+        }))
+        .filter((item) => item.sku || item.ean || item.quantityBoxes || item.quantityUnits)
+        .sort((a, b) => {
+            const aKey = `${a.sku}|${a.ean}`;
+            const bKey = `${b.sku}|${b.ean}`;
+            return aKey.localeCompare(bKey);
+        });
+
+    return {
+        detectedOrderNumber: normalizeManualOcOrderNumber(detectedOrderNumber),
+        quantities: {
+            Pedido_Cantidad_Pink: toPositiveInteger(quantities?.Pedido_Cantidad_Pink),
+            Pedido_Cantidad_Amargo: toPositiveInteger(quantities?.Pedido_Cantidad_Amargo),
+            Pedido_Cantidad_Leche: toPositiveInteger(quantities?.Pedido_Cantidad_Leche),
+            Pedido_Cantidad_Free: toPositiveInteger(quantities?.Pedido_Cantidad_Free),
+            Pedido_Cantidad_Pink_90g: toPositiveInteger(quantities?.Pedido_Cantidad_Pink_90g),
+            Pedido_Cantidad_Amargo_90g: toPositiveInteger(quantities?.Pedido_Cantidad_Amargo_90g),
+            Pedido_Cantidad_Leche_90g: toPositiveInteger(quantities?.Pedido_Cantidad_Leche_90g)
+        },
+        totals: {
+            costoTotalExclIva: Math.round(parseNumberish(totals?.costoTotalExclIva || 0)),
+            ivaTotal: Math.round(parseNumberish(totals?.ivaTotal || 0)),
+            costoTotalIncIva: Math.round(parseNumberish(totals?.costoTotalIncIva || 0))
+        },
+        itemStats: {
+            count: toPositiveInteger(analysis?.itemStats?.count),
+            quantityBoxesTotal: Math.round(parseNumberish(analysis?.itemStats?.quantityBoxesTotal || 0)),
+            quantityUnitsTotal: Math.round(parseNumberish(analysis?.itemStats?.quantityUnitsTotal || 0))
+        },
+        items: normalizedItems
+    };
+}
+
+function buildManualOcConflictSignature(snapshot) {
+    const safeSnapshot = snapshot || {};
+    const safeQuantities = safeSnapshot.quantities || {};
+    const safeTotals = safeSnapshot.totals || {};
+    const safeItems = Array.isArray(safeSnapshot.items) ? safeSnapshot.items : [];
+
+    return {
+        detectedOrderNumber: safeSnapshot.detectedOrderNumber || null,
+        quantities: {
+            Pedido_Cantidad_Pink: toPositiveInteger(safeQuantities.Pedido_Cantidad_Pink),
+            Pedido_Cantidad_Amargo: toPositiveInteger(safeQuantities.Pedido_Cantidad_Amargo),
+            Pedido_Cantidad_Leche: toPositiveInteger(safeQuantities.Pedido_Cantidad_Leche),
+            Pedido_Cantidad_Free: toPositiveInteger(safeQuantities.Pedido_Cantidad_Free),
+            Pedido_Cantidad_Pink_90g: toPositiveInteger(safeQuantities.Pedido_Cantidad_Pink_90g),
+            Pedido_Cantidad_Amargo_90g: toPositiveInteger(safeQuantities.Pedido_Cantidad_Amargo_90g),
+            Pedido_Cantidad_Leche_90g: toPositiveInteger(safeQuantities.Pedido_Cantidad_Leche_90g)
+        },
+        totals: {
+            costoTotalExclIva: Math.round(parseNumberish(safeTotals.costoTotalExclIva || 0)),
+            costoTotalIncIva: Math.round(parseNumberish(safeTotals.costoTotalIncIva || 0))
+        },
+        items: safeItems.map((item) => ({
+            sku: normalizeSkuLikeValue(item?.sku),
+            quantityBoxes: toPositiveInteger(item?.quantityBoxes),
+            quantityUnits: toPositiveInteger(item?.quantityUnits)
+        }))
+    };
+}
+
+function areManualOcSnapshotsEquivalent(left, right) {
+    if (!left || !right) {
+        return false;
+    }
+    const leftSignature = buildManualOcConflictSignature(left);
+    const rightSignature = buildManualOcConflictSignature(right);
+    return JSON.stringify(leftSignature) === JSON.stringify(rightSignature);
+}
 
 /**
  * KeyLogistics master data for billing/shipping resolution.
@@ -1466,16 +1751,10 @@ async function sendManualMergedToMake({
     arrivalMeridiem,
     arrivalDateTime,
     uploadedBy,
-    fileMeta
+    fileMeta,
+    developerMode = false,
+    submitRequest = null
 }) {
-    if (!MAKE_MANUAL_OC_WEBHOOK_URL) {
-        return {
-            delivered: false,
-            skipped: true,
-            reason: 'missing_make_webhook_url'
-        };
-    }
-
     const merged = mergedResult?.merged || null;
     const deliveryReservation = mergedResult?.deliveryReservation || null;
     const emailData = merged?.EmailData || null;
@@ -1524,6 +1803,7 @@ async function sendManualMergedToMake({
         composition: {
             emailData,
             clientData,
+            submitRequest: submitRequest || null,
             mergedMeta: {
                 executionDate: merged?.executionDate || null,
                 ocDate: merged?.OC_date || null,
@@ -1537,6 +1817,29 @@ async function sendManualMergedToMake({
         merged,
         deliveryReservation
     };
+
+    if (developerMode === true) {
+        await fs.promises.mkdir(MANUAL_OC_DEVELOPER_OUTBOX_DIR, { recursive: true });
+        const safeManualOcId = String(manualOcId || 'manual_oc').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const dumpFileName = `${new Date().toISOString().replace(/[:.]/g, '-')}_${safeManualOcId}.json`;
+        const dumpPath = path.join(MANUAL_OC_DEVELOPER_OUTBOX_DIR, dumpFileName);
+        await fs.promises.writeFile(dumpPath, JSON.stringify(makePayload, null, 2), 'utf8');
+        return {
+            delivered: false,
+            skipped: true,
+            reason: 'developer_mode_payload_dumped',
+            developerMode: true,
+            payloadDumpPath: dumpPath
+        };
+    }
+
+    if (!MAKE_MANUAL_OC_WEBHOOK_URL) {
+        return {
+            delivered: false,
+            skipped: true,
+            reason: 'missing_make_webhook_url'
+        };
+    }
 
     const makeResponse = await fetch(MAKE_MANUAL_OC_WEBHOOK_URL, {
         method: 'POST',
@@ -2464,6 +2767,404 @@ async function runReadEmailBodyPayload(payload) {
     });
 }
 
+function resolveManualOcBatchUi(status) {
+    switch (status) {
+        case 'ready':
+            return {
+                color: 'green',
+                legend: 'Listo para procesar',
+                tooltip: 'Archivo valido y sin duplicados detectados.'
+            };
+        case 'duplicate_batch':
+            return {
+                color: 'yellow',
+                legend: 'Duplicado en tanda',
+                tooltip: 'Esta OC se repite en la misma tanda. Se mantiene el archivo preferido (Excel).'
+            };
+        case 'duplicate_backend':
+            return {
+                color: 'orange',
+                legend: 'OC ya procesada',
+                tooltip: 'Esta OC ya existe como procesada en el backend.'
+            };
+        case 'conflict':
+            return {
+                color: 'red',
+                legend: 'Conflictivo',
+                tooltip: 'Misma OC con datos distintos entre archivos. Requiere resolucion manual en UI.'
+            };
+        case 'missing_oc':
+            return {
+                color: 'gray',
+                legend: 'Sin OC detectada',
+                tooltip: 'No se pudo detectar numero de OC desde el contenido del archivo.'
+            };
+        default:
+            return {
+                color: 'red',
+                legend: 'Error',
+                tooltip: 'No se pudo analizar este archivo.'
+            };
+    }
+}
+
+function formatManualOcBackendDuplicate(record) {
+    if (!record) {
+        return null;
+    }
+    return {
+        exists: true,
+        manualOcId: record.manualOcId || null,
+        status: record.status || null,
+        createdAt: record.createdAt || null,
+        updatedAt: record.updatedAt || null
+    };
+}
+
+async function analyzeManualOcBatchFile({
+    file,
+    index
+}) {
+    const fileName = String(file?.fileName || '').trim();
+    const mimeType = String(file?.mimeType || '').trim();
+    const fileSize = Number(file?.fileSize || 0);
+    const fileBase64 = file?.fileBase64;
+    const clientFileId = String(file?.clientFileId || file?.id || '').trim() || null;
+
+    if (!fileName || !fileBase64) {
+        return {
+            index,
+            clientFileId,
+            fileName,
+            mimeType,
+            fileSize,
+            fileType: null,
+            detectedOrderNumber: null,
+            status: 'error',
+            statusReason: 'missing_file_payload',
+            recommendedAction: 'revisar_archivo',
+            ui: resolveManualOcBatchUi('error'),
+            error: 'fileName y fileBase64 son requeridos por archivo'
+        };
+    }
+
+    try {
+        const fileBuffer = decodeFileBase64ToBuffer(fileBase64);
+        const fileSha256 = createHash('sha256').update(fileBuffer).digest('hex');
+        const extractedFile = await extractManualOcTextFromFile({
+            fileName,
+            mimeType,
+            fileBuffer
+        });
+
+        const excelAnalysis = extractedFile?.excelPreview?.analysis || null;
+        const pdfAnalysis = extractedFile.fileType === 'pdf'
+            ? extractPeyaPdfAnalysis(extractedFile.text)
+            : null;
+        const detectedOrderNumber = (
+            extractManualOcOrderNumber({ fileName, text: extractedFile.text })
+            || normalizeManualOcOrderNumber(excelAnalysis?.purchaseOrderNumber)
+            || normalizeManualOcOrderNumber(pdfAnalysis?.purchaseOrderNumber)
+        );
+
+        const quantitiesPayload = buildManualOcPayloadForQuantities({
+            fileName,
+            mimeType,
+            text: extractedFile.text
+        });
+        const quantities = parsePedidosYaOrderQuantities(quantitiesPayload)
+            || { ...EMPTY_ORDER_QUANTITIES };
+        const comparableSnapshot = buildManualOcComparableSnapshot({
+            detectedOrderNumber,
+            quantities,
+            excelAnalysis,
+            pdfAnalysis
+        });
+
+        const detectedDateInfo = detectOcDateFromText(extractedFile.text);
+        const detectedDate = detectedDateInfo?.date
+            || excelAnalysis?.dates?.fechaEmision
+            || pdfAnalysis?.dates?.fechaEmision
+            || null;
+
+        return {
+            index,
+            clientFileId,
+            fileName,
+            mimeType,
+            fileSize,
+            fileSha256,
+            fileType: extractedFile.fileType,
+            detectedOrderNumber,
+            detectedDate,
+            quantities,
+            itemCount: comparableSnapshot?.itemStats?.count || 0,
+            comparableSnapshot,
+            excelAnalysis,
+            pdfAnalysis,
+            backendDuplicate: null,
+            status: detectedOrderNumber ? 'pending' : 'missing_oc',
+            statusReason: detectedOrderNumber ? 'pending_group_resolution' : 'missing_order_number',
+            recommendedAction: detectedOrderNumber ? 'evaluar_deduplicacion' : 'resolver_manual_oc',
+            ui: resolveManualOcBatchUi(detectedOrderNumber ? 'ready' : 'missing_oc'),
+            error: null
+        };
+    } catch (error) {
+        return {
+            index,
+            clientFileId,
+            fileName,
+            mimeType,
+            fileSize,
+            fileType: null,
+            detectedOrderNumber: null,
+            status: 'error',
+            statusReason: 'file_read_failed',
+            recommendedAction: 'revisar_archivo',
+            ui: resolveManualOcBatchUi('error'),
+            error: error?.message || String(error)
+        };
+    }
+}
+
+function finalizeManualOcBatchDecisions(entries = []) {
+    const groupedByOrder = new Map();
+    const preferredByOrder = new Map();
+
+    for (const entry of entries) {
+        if (entry.status === 'error' || entry.status === 'missing_oc' || !entry.detectedOrderNumber) {
+            continue;
+        }
+        const key = entry.detectedOrderNumber;
+        if (!groupedByOrder.has(key)) {
+            groupedByOrder.set(key, []);
+        }
+        groupedByOrder.get(key).push(entry);
+    }
+
+    for (const [orderNumber, group] of groupedByOrder.entries()) {
+        group.sort((a, b) => a.index - b.index);
+        const excelCandidates = group.filter((entry) => entry.fileType === 'excel');
+        const preferredGroup = excelCandidates.length > 0 ? excelCandidates : group;
+        const preferred = preferredGroup[0];
+        preferredByOrder.set(orderNumber, preferred);
+
+        const preferredConflict = preferredGroup.some((entry) => (
+            !areManualOcSnapshotsEquivalent(entry.comparableSnapshot, preferred.comparableSnapshot)
+        ));
+
+        if (preferredConflict) {
+            for (const entry of group) {
+                entry.status = 'conflict';
+                entry.statusReason = 'same_oc_different_data';
+                entry.recommendedAction = 'resolver_conflicto';
+                entry.isPreferredInBatch = entry.index === preferred.index;
+                entry.preferredFileName = preferred.fileName;
+                entry.ui = resolveManualOcBatchUi('conflict');
+            }
+            continue;
+        }
+
+        for (const entry of group) {
+            entry.isPreferredInBatch = entry.index === preferred.index;
+            entry.preferredFileName = preferred.fileName;
+
+            if (entry.index !== preferred.index) {
+                if (excelCandidates.length > 0 && entry.fileType === 'pdf') {
+                    entry.status = 'duplicate_batch';
+                    entry.statusReason = 'duplicate_oc_prefer_excel';
+                    entry.recommendedAction = 'descartar_duplicado';
+                    entry.ui = resolveManualOcBatchUi('duplicate_batch');
+                    continue;
+                }
+
+                const equivalentToPreferred = areManualOcSnapshotsEquivalent(
+                    entry.comparableSnapshot,
+                    preferred.comparableSnapshot
+                );
+                if (!equivalentToPreferred) {
+                    entry.status = 'conflict';
+                    entry.statusReason = 'same_oc_different_data';
+                    entry.recommendedAction = 'resolver_conflicto';
+                    entry.ui = resolveManualOcBatchUi('conflict');
+                    continue;
+                }
+
+                entry.status = 'duplicate_batch';
+                entry.statusReason = preferred.fileType === 'excel' && entry.fileType === 'pdf'
+                    ? 'duplicate_oc_prefer_excel'
+                    : 'duplicate_oc_in_batch';
+                entry.recommendedAction = 'descartar_duplicado';
+                entry.ui = resolveManualOcBatchUi('duplicate_batch');
+                continue;
+            }
+
+            if (entry.backendDuplicate?.exists) {
+                entry.status = 'duplicate_backend';
+                entry.statusReason = 'oc_already_processed_backend';
+                entry.recommendedAction = 'no_procesar';
+                entry.ui = resolveManualOcBatchUi('duplicate_backend');
+            } else {
+                entry.status = 'ready';
+                entry.statusReason = 'ok';
+                entry.recommendedAction = 'procesar';
+                entry.ui = resolveManualOcBatchUi('ready');
+            }
+        }
+    }
+
+    return preferredByOrder;
+}
+
+function summarizeManualOcBatchEntries(entries = []) {
+    const counts = {
+        total: entries.length,
+        ready: 0,
+        duplicate_batch: 0,
+        duplicate_backend: 0,
+        conflict: 0,
+        missing_oc: 0,
+        error: 0
+    };
+
+    for (const entry of entries) {
+        if (Object.prototype.hasOwnProperty.call(counts, entry.status)) {
+            counts[entry.status] += 1;
+        }
+    }
+
+    return {
+        ...counts,
+        blocked: counts.total - counts.ready
+    };
+}
+
+async function readManualOcBatchDedup(req, res) {
+    try {
+        const body = req.body || {};
+        const sourceClientCode = String(body.sourceClientCode || '').trim().toUpperCase();
+        const uploadedBy = String(body.uploadedBy || '').trim();
+        const files = Array.isArray(body.files) ? body.files : [];
+
+        if (!uploadedBy) {
+            return res.status(400).json({
+                success: false,
+                error: 'uploadedBy es requerido'
+            });
+        }
+
+        if (files.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'files debe contener al menos un archivo'
+            });
+        }
+
+        const profile = getManualOcClientProfile(sourceClientCode);
+        if (!profile) {
+            return res.status(400).json({
+                success: false,
+                error: `sourceClientCode no soportado: ${sourceClientCode}`
+            });
+        }
+
+        const analyzedEntries = [];
+        for (let index = 0; index < files.length; index += 1) {
+            const analyzed = await analyzeManualOcBatchFile({
+                file: files[index],
+                index
+            });
+            analyzedEntries.push(analyzed);
+        }
+
+        const uniqueOrderNumbers = Array.from(new Set(
+            analyzedEntries
+                .map((entry) => entry.detectedOrderNumber)
+                .filter(Boolean)
+        ));
+        const backendDuplicatesByOrder = new Map();
+        const backendDedupWarnings = [];
+        for (const orderNumber of uniqueOrderNumbers) {
+            try {
+                const backendRecord = await findLatestManualOcByDetectedOrderNumber({
+                    sourceClientCode: profile.sourceClientCode,
+                    detectedOrderNumber: orderNumber,
+                    statuses: MANUAL_OC_PROCESSED_STATUSES
+                });
+                backendDuplicatesByOrder.set(orderNumber, formatManualOcBackendDuplicate(backendRecord));
+            } catch (backendError) {
+                backendDuplicatesByOrder.set(orderNumber, null);
+                backendDedupWarnings.push(
+                    `No se pudo validar dedup backend para ${orderNumber}: ${backendError?.message || backendError}`
+                );
+            }
+        }
+
+        for (const entry of analyzedEntries) {
+            if (!entry.detectedOrderNumber) {
+                continue;
+            }
+            entry.backendDuplicate = backendDuplicatesByOrder.get(entry.detectedOrderNumber) || null;
+        }
+
+        const preferredByOrder = finalizeManualOcBatchDecisions(analyzedEntries);
+        const summary = summarizeManualOcBatchEntries(analyzedEntries);
+        const results = analyzedEntries
+            .sort((a, b) => a.index - b.index)
+            .map((entry) => ({
+                index: entry.index,
+                clientFileId: entry.clientFileId || null,
+                fileName: entry.fileName || null,
+                mimeType: entry.mimeType || null,
+                fileSize: Number.isFinite(entry.fileSize) ? entry.fileSize : 0,
+                fileType: entry.fileType || null,
+                detectedOrderNumber: entry.detectedOrderNumber || null,
+                detectedDate: entry.detectedDate || null,
+                itemCount: entry.itemCount || 0,
+                quantities: entry.quantities || { ...EMPTY_ORDER_QUANTITIES },
+                status: entry.status,
+                statusReason: entry.statusReason || null,
+                recommendedAction: entry.recommendedAction || null,
+                isPreferredInBatch: entry.isPreferredInBatch === true,
+                preferredFileName: entry.preferredFileName || null,
+                backendDuplicate: entry.backendDuplicate || { exists: false },
+                ui: entry.ui || resolveManualOcBatchUi(entry.status),
+                error: entry.error || null
+            }));
+
+        const perOrder = Array.from(preferredByOrder.entries()).map(([orderNumber, preferredEntry]) => ({
+            orderNumber,
+            preferredFileName: preferredEntry?.fileName || null,
+            preferredFileType: preferredEntry?.fileType || null
+        }));
+
+        return res.status(200).json({
+            success: true,
+            sourceClientCode: profile.sourceClientCode,
+            sourceClientName: profile.sourceClientName,
+            parserProfile: profile.parserProfile,
+            uploadedBy,
+            summary,
+            rulesApplied: [
+                'dedup_within_batch_by_detected_order_number',
+                'dedup_against_backend_processed_records',
+                'prefer_excel_over_pdf_for_same_oc',
+                'mark_conflict_when_same_oc_has_different_snapshot'
+            ],
+            warnings: backendDedupWarnings,
+            perOrder,
+            results
+        });
+    } catch (error) {
+        console.error('Error en readManualOcBatchDedup:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'No se pudo deduplicar la tanda manual OC',
+            details: error?.message || String(error)
+        });
+    }
+}
+
 async function readManualOcExtractDate(req, res) {
     try {
         const body = req.body || {};
@@ -2524,6 +3225,27 @@ async function readManualOcExtractDate(req, res) {
                 confidence: 'high',
                 method: 'excel_field_fecha_emision'
             };
+        const detectedOrderNumber = (
+            extractManualOcOrderNumber({ fileName, text: extractedFile.text })
+            || normalizeManualOcOrderNumber(excelAnalysis?.purchaseOrderNumber)
+        );
+        const backendDuplicateRecord = detectedOrderNumber
+            ? await findLatestManualOcByDetectedOrderNumber({
+                sourceClientCode: profile.sourceClientCode,
+                detectedOrderNumber,
+                statuses: MANUAL_OC_PROCESSED_STATUSES
+            })
+            : null;
+        if (backendDuplicateRecord) {
+            return res.status(409).json({
+                success: false,
+                error: 'Orden de compra ya procesada en backend',
+                duplicate: true,
+                duplicateSource: 'backend',
+                detectedOrderNumber,
+                backendRecord: formatManualOcBackendDuplicate(backendDuplicateRecord)
+            });
+        }
         const manualOcId = randomUUID();
         const warnings = [];
 
@@ -2555,6 +3277,7 @@ async function readManualOcExtractDate(req, res) {
             ocDateDetected: detectedDateInfo.date || null,
             ocDateDetectedConfidence: detectedDateInfo.confidence,
             ocDateDetectionMethod: detectedDateInfo.method,
+            detectedOrderNumber: detectedOrderNumber || null,
             rawPayloadForParser: null,
             excelText: extractedFile.text,
             excelAnalysis,
@@ -2575,6 +3298,7 @@ async function readManualOcExtractDate(req, res) {
             sourceClientName: profile.sourceClientName,
             parserProfile: profile.parserProfile,
             fileType: extractedFile.fileType,
+            detectedOrderNumber: detectedOrderNumber || null,
             ocDateDetected: detectedDateInfo.date || null,
             ocDateDetectedConfidence: detectedDateInfo.confidence,
             ocDateDetectionMethod: detectedDateInfo.method,
@@ -2626,16 +3350,44 @@ async function readManualOcPreview(req, res) {
             });
         }
 
-        if (!/\.xlsx?$/i.test(fileName)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Solo se aceptan archivos Excel (.xlsx/.xls) para este flujo'
-            });
-        }
-
         const fileBuffer = decodeFileBase64ToBuffer(fileBase64);
         const fileSha256 = createHash('sha256').update(fileBuffer).digest('hex');
-        const excelText = excelBufferToText(fileBuffer);
+        let extractedFile;
+        try {
+            extractedFile = await extractManualOcTextFromFile({
+                fileName,
+                mimeType,
+                fileBuffer
+            });
+        } catch (fileError) {
+            return res.status(400).json({
+                success: false,
+                error: fileError?.message || 'No se pudo leer el archivo'
+            });
+        }
+        const excelText = extractedFile.text;
+        const excelAnalysis = extractedFile?.excelPreview?.analysis || null;
+        const detectedOrderNumber = (
+            extractManualOcOrderNumber({ fileName, text: extractedFile.text })
+            || normalizeManualOcOrderNumber(excelAnalysis?.purchaseOrderNumber)
+        );
+        const backendDuplicateRecord = detectedOrderNumber
+            ? await findLatestManualOcByDetectedOrderNumber({
+                sourceClientCode: profile.sourceClientCode,
+                detectedOrderNumber,
+                statuses: MANUAL_OC_PROCESSED_STATUSES
+            })
+            : null;
+        if (backendDuplicateRecord) {
+            return res.status(409).json({
+                success: false,
+                error: 'Orden de compra ya procesada en backend',
+                duplicate: true,
+                duplicateSource: 'backend',
+                detectedOrderNumber,
+                backendRecord: formatManualOcBackendDuplicate(backendDuplicateRecord)
+            });
+        }
 
         const detectedDateInfo = detectOcDateFromText(excelText);
         const manualOcId = randomUUID();
@@ -2664,13 +3416,16 @@ async function readManualOcPreview(req, res) {
                 fileName,
                 mimeType,
                 fileSize,
-                fileSha256
+                fileSha256,
+                fileType: extractedFile.fileType
             },
             ocDateDetected: detectedDateInfo.date || null,
             ocDateDetectedConfidence: detectedDateInfo.confidence,
             ocDateDetectionMethod: detectedDateInfo.method,
+            detectedOrderNumber: detectedOrderNumber || null,
             rawPayloadForParser: payload,
             excelText,
+            excelAnalysis,
             timeline: [
                 {
                     event: 'preview_requested',
@@ -2685,6 +3440,12 @@ async function readManualOcPreview(req, res) {
         const warnings = [];
         if (!detectedDateInfo.date) {
             warnings.push('No se detecto fecha OC automaticamente, usar fecha manual.');
+        }
+        if (extractedFile.fileType === 'excel' && excelAnalysis && !excelAnalysis.dates?.fechaEmision) {
+            warnings.push('No se detecto Fecha emision en la estructura del Excel.');
+        }
+        if (extractedFile.fileType === 'excel' && excelAnalysis && (excelAnalysis.itemStats?.count || 0) === 0) {
+            warnings.push('No se detectaron items en el bloque de detalle del Excel.');
         }
         if (!previewSuccess) {
             warnings.push('El parser no pudo construir merged valido en preview.');
@@ -2708,9 +3469,13 @@ async function readManualOcPreview(req, res) {
             sourceClientCode: profile.sourceClientCode,
             sourceClientName: profile.sourceClientName,
             parserProfile: profile.parserProfile,
+            fileType: extractedFile.fileType,
+            detectedOrderNumber: detectedOrderNumber || null,
             ocDateDetected: detectedDateInfo.date || null,
             ocDateDetectedConfidence: detectedDateInfo.confidence,
             warnings,
+            excelPreview: extractedFile.excelPreview || null,
+            excelAnalysis,
             preview: {
                 status: previewResponse.status,
                 body: previewResponse.body
@@ -2922,13 +3687,16 @@ async function readManualOcDispatchPreview(req, res) {
 }
 
 async function readManualOcSubmit(req, res) {
+    let trackedManualOcId = '';
     try {
         const body = req.body || {};
         const manualOcId = String(body.manualOcId || '').trim();
+        trackedManualOcId = manualOcId;
         const ocDateConfirmed = String(body.ocDateConfirmed || '').trim();
         const arrivalDate = String(body.arrivalDate || '').trim();
         const arrivalMeridiem = normalizeManualOcArrivalMeridiem(body.arrivalMeridiem);
         const uploadedBy = String(body.uploadedBy || '').trim();
+        const developerMode = parseBooleanLoose(body.developerMode, MANUAL_OC_DEVELOPER_MODE_DEFAULT);
 
         if (!manualOcId) {
             return res.status(400).json({
@@ -2945,12 +3713,107 @@ async function readManualOcSubmit(req, res) {
             });
         }
 
+        const recordStatus = String(record.status || '').trim();
+        if (recordStatus === 'submit_processing' && record.makeResult) {
+            const recoveredStatus = record.makeResult.delivered
+                ? 'submitted_to_make'
+                : (record.makeResult.skipped ? 'submit_skipped_make' : 'submit_failed_make');
+            await updateManualOcRecord(manualOcId, {
+                status: recoveredStatus
+            });
+            await appendManualOcTimeline(manualOcId, {
+                event: 'submit_recovered_from_processing',
+                recoveredStatus
+            });
+
+            return res.status(200).json({
+                success: true,
+                manualOcId,
+                sourceClientCode: record.sourceClientCode || null,
+                parserProfile: record.parserProfile || null,
+                developerMode: record.makeResult?.developerMode === true,
+                ocDateDetected: record.ocDateDetected || null,
+                ocDateConfirmed: record.ocDateConfirmed || null,
+                arrivalDate: record.arrivalDate || null,
+                arrivalMeridiem: record.arrivalMeridiem || null,
+                parser: {
+                    status: record.submitParserStatusCode || null,
+                    body: record.submitParserResponseBody || null
+                },
+                make: record.makeResult
+            });
+        }
+
+        const finalStatuses = new Set(['submitted_to_make', 'submit_skipped_make']);
+        if (finalStatuses.has(recordStatus) && record.makeResult) {
+            return res.status(200).json({
+                success: true,
+                manualOcId,
+                sourceClientCode: record.sourceClientCode || null,
+                parserProfile: record.parserProfile || null,
+                developerMode: record.makeResult?.developerMode === true,
+                ocDateDetected: record.ocDateDetected || null,
+                ocDateConfirmed: record.ocDateConfirmed || null,
+                arrivalDate: record.arrivalDate || null,
+                arrivalMeridiem: record.arrivalMeridiem || null,
+                parser: {
+                    status: record.submitParserStatusCode || null,
+                    body: record.submitParserResponseBody || null
+                },
+                make: record.makeResult
+            });
+        }
+
+        if (recordStatus === 'submit_processing') {
+            const updatedAtMs = new Date(record.updatedAt || 0).getTime();
+            const staleMs = 2 * 60 * 1000;
+            if (Number.isFinite(updatedAtMs) && (Date.now() - updatedAtMs) < staleMs) {
+                return res.status(409).json({
+                    success: false,
+                    error: 'La OC manual ya se encuentra en procesamiento',
+                    manualOcId,
+                    status: recordStatus
+                });
+            }
+        }
+
         const profile = getManualOcClientProfile(record.sourceClientCode);
         if (!profile) {
             return res.status(400).json({
                 success: false,
                 error: `sourceClientCode no soportado: ${record.sourceClientCode}`
             });
+        }
+
+        const detectedOrderNumber = normalizeManualOcOrderNumber(record.detectedOrderNumber);
+        if (detectedOrderNumber) {
+            const duplicateProcessedRecord = await findLatestManualOcByDetectedOrderNumber({
+                sourceClientCode: profile.sourceClientCode,
+                detectedOrderNumber,
+                statuses: MANUAL_OC_PROCESSED_STATUSES
+            });
+            const duplicateManualOcId = String(duplicateProcessedRecord?.manualOcId || '').trim();
+
+            if (duplicateProcessedRecord && duplicateManualOcId && duplicateManualOcId !== manualOcId) {
+                await updateManualOcRecord(manualOcId, {
+                    status: 'submit_blocked_duplicate_backend',
+                    submitError: `OC ${detectedOrderNumber} ya tiene procesamiento activo o finalizado (${duplicateManualOcId})`
+                });
+                await appendManualOcTimeline(manualOcId, {
+                    event: 'submit_blocked_duplicate_backend',
+                    detectedOrderNumber,
+                    duplicateManualOcId
+                });
+
+                return res.status(409).json({
+                    success: false,
+                    error: 'Orden de compra ya procesada o en procesamiento',
+                    duplicate: true,
+                    duplicateSource: 'backend_submit_guard',
+                    detectedOrderNumber,
+                    backendRecord: formatManualOcBackendDuplicate(duplicateProcessedRecord)
+                });
+            }
         }
 
         const confirmedDate = parseManualDateCandidate(ocDateConfirmed || record.ocDateDetected);
@@ -3009,16 +3872,54 @@ async function readManualOcSubmit(req, res) {
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
             arrivalMeridiem: arrivalInfo.meridiem,
-            submitRequestedBy: uploadedBy || record.uploadedBy
+            submitRequestedBy: uploadedBy || record.uploadedBy,
+            submitDeveloperMode: developerMode
         });
         await appendManualOcTimeline(manualOcId, {
             event: 'submit_requested',
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
-            arrivalMeridiem: arrivalInfo.meridiem
+            arrivalMeridiem: arrivalInfo.meridiem,
+            developerMode
         });
 
-        const parserResponse = await runReadEmailBodyPayload(payload);
+        let parserResponse = null;
+        let parserException = null;
+        const parserAttempts = 2;
+        for (let attempt = 1; attempt <= parserAttempts; attempt += 1) {
+            try {
+                parserResponse = await runReadEmailBodyPayload(payload);
+                parserException = null;
+                break;
+            } catch (currentParserError) {
+                parserException = currentParserError;
+                if (attempt < parserAttempts) {
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                }
+            }
+        }
+
+        if (parserException) {
+            await updateManualOcRecord(manualOcId, {
+                status: 'submit_failed_parser_exception',
+                submitError: parserException?.message || String(parserException)
+            });
+            await appendManualOcTimeline(manualOcId, {
+                event: 'submit_failed_parser_exception',
+                attempts: parserAttempts,
+                errorMessage: parserException?.message || String(parserException)
+            });
+
+            return res.status(502).json({
+                success: false,
+                error: 'El parser lanzó una excepción durante el submit manual OC',
+                details: parserException?.message || String(parserException),
+                parser: {
+                    attempts: parserAttempts
+                }
+            });
+        }
+
         const parserSuccess = parserResponse.status >= 200 && parserResponse.status < 300;
 
         if (!parserSuccess) {
@@ -3052,7 +3953,19 @@ async function readManualOcSubmit(req, res) {
             arrivalMeridiem: arrivalInfo.meridiem,
             arrivalDateTime: arrivalInfo.dateTimeIso,
             uploadedBy: uploadedBy || record.uploadedBy,
-            fileMeta: record.fileMeta || null
+            fileMeta: record.fileMeta || null,
+            developerMode,
+            submitRequest: {
+                uiSubmitBody: body,
+                manualOcId,
+                uploadedBy: uploadedBy || record.uploadedBy,
+                sourceClientCode: profile.sourceClientCode,
+                ocDateConfirmed: confirmedDate,
+                arrivalDate: arrivalInfo.date,
+                arrivalMeridiem: arrivalInfo.meridiem,
+                arrivalDateTime: arrivalInfo.dateTimeIso,
+                developerMode
+            }
         });
 
         const finalStatus = makeResult.delivered
@@ -3068,7 +3981,9 @@ async function readManualOcSubmit(req, res) {
         await appendManualOcTimeline(manualOcId, {
             event: finalStatus,
             makeStatus: makeResult.status || null,
-            makeDelivered: makeResult.delivered === true
+            makeDelivered: makeResult.delivered === true,
+            developerMode,
+            payloadDumpPath: makeResult.payloadDumpPath || null
         });
 
         const statusCode = makeResult.delivered || makeResult.skipped ? 200 : 502;
@@ -3077,6 +3992,7 @@ async function readManualOcSubmit(req, res) {
             manualOcId,
             sourceClientCode: profile.sourceClientCode,
             parserProfile: profile.parserProfile,
+            developerMode,
             ocDateDetected: record.ocDateDetected || null,
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
@@ -3090,6 +4006,22 @@ async function readManualOcSubmit(req, res) {
         });
     } catch (error) {
         console.error('Error en readManualOcSubmit:', error);
+        if (trackedManualOcId) {
+            try {
+                await updateManualOcRecord(trackedManualOcId, {
+                    status: 'submit_failed_exception',
+                    submitError: error?.message || String(error)
+                });
+                await appendManualOcTimeline(trackedManualOcId, {
+                    event: 'submit_failed_exception',
+                    errorMessage: error?.message || String(error)
+                });
+            } catch (trackingError) {
+                console.warn(
+                    `No se pudo guardar submit_failed_exception para ${trackedManualOcId}: ${trackingError?.message || trackingError}`
+                );
+            }
+        }
         return res.status(500).json({
             success: false,
             error: 'No se pudo completar submit manual OC',
@@ -3750,12 +4682,9 @@ export {
     readCSV,
     readEmailBody,
     readEmailBodyFromGmail,
+    readManualOcBatchDedup,
     readManualOcExtractDate,
     readManualOcPreview,
     readManualOcDispatchPreview,
     readManualOcSubmit
 };
-
-
-
-
