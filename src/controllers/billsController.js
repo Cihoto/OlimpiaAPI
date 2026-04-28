@@ -360,7 +360,7 @@ async function createBill(req, res) {
         const BILLJSON = await bill.toJSON();
 
         console.log("+++++++++++++++++++++++ ++++++++++++++++++++++++++++++++ +++++++++++++++++++++++");
-        console.log("+++++++++++++++++++++++ JSON DE DOUCMENTO PARA DEFONTANA +++++++++++++++++++++++");
+        console.log("+++++++++++++++++++++++ JSON DE DOCUMENTO PARA DEFONTANA +++++++++++++++++++++++");
         console.log("+++++++++++++++++++++++ ++++++++++++++++++++++++++++++++ +++++++++++++++++++++++");
         console.log("BILLJSON", BILLJSON);
 
@@ -587,6 +587,51 @@ async function getBillById(req, res) {
     }
 }
 
+async function preflightBill(req, res) {
+    if (!req.apiKey) {
+        res.status(401).json({ code: 401, error: 'Error al autenticar' });
+        return;
+    }
+    try {
+        const { body } = req;
+        const bill = new Bill();
+        bill.apiKey = req.apiKey;
+        bill.documentType = body.documentType;
+        bill.firstFolio = body.firstFolio;
+        bill.lastFolio = body.lastFolio;
+        bill.clientFile = body.clientFile;
+        bill.paymentCondition = body.paymentCondition;
+        bill.sellerFileId = body.sellerFileId;
+        bill.billingCoin = body.billingCoin;
+        bill.businessCenter = body.businessCenter;
+        bill.shopId = body.shopId;
+        bill.priceList = body.priceList;
+        bill.giro = body.giro;
+        bill.attachedDocuments = body.attachedDocuments;
+        bill.storage = body.storage;
+        bill.details = body.details;
+        bill.ventaRecDesGlobal = body.ventaRecDesGlobal;
+        bill.customFields = body.customFields;
+        bill.gloss = body.gloss;
+        bill.isTransferDocument = body.isTransferDocument;
+        bill.deliveryDay = body.deliveryDay ? body.deliveryDay : null;
 
+        const report = await bill.runPreflight();
 
-export { createBill, getBillById };
+        res.status(report.allPassed ? 200 : 400).json({
+            success: report.allPassed,
+            summary: {
+                allPassed: report.allPassed,
+                passedCount: report.passedCount,
+                failedCount: report.failedCount,
+                firstFailure: report.firstFailure
+            },
+            steps: report.steps
+        });
+    } catch (error) {
+        console.error('Error running bill preflight:', error);
+        res.status(500).json({ errorCode: 5000, errorMessage: 'Internal server error during preflight' });
+    }
+}
+
+export { createBill, getBillById, preflightBill };

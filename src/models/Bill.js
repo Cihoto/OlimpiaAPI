@@ -105,6 +105,84 @@ class Bill {
         return response;
     }
 
+    async runPreflight() {
+        const steps = [];
+        let businessAnalysisResult = null;
+
+        const runStep = async (name, fn) => {
+            const start = Date.now();
+            try {
+                const result = await fn();
+                const pass = result?.success !== false;
+                steps.push({ step: name, pass, durationMs: Date.now() - start, result: pass ? undefined : result });
+                return { pass, data: result };
+            } catch (err) {
+                steps.push({ step: name, pass: false, durationMs: Date.now() - start, error: err?.message || String(err) });
+                return { pass: false, data: null };
+            }
+        };
+
+        // Step 0: validate fields
+        const validateStep = await runStep('validate', () => {
+            try {
+                this.validate();
+                return { success: true };
+            } catch (err) {
+                return { success: false, message: err?.message };
+            }
+        });
+
+        // Step 1: client lookup (root cause target)
+        await runStep('getClientByFileId', () => this.#getClientByFileId(this.apiKey, this.clientFile));
+
+        // Step 2: payment condition (sync)
+        await runStep('checkPaymentCondition', () => Promise.resolve(this.#checkpaymentCondition()));
+
+        // Step 3: seller lookup
+        await runStep('getSellerInfo', () => this.#getSellerInfo());
+
+        // Step 4: shops lookup
+        await runStep('getShops', () => this.#getShops());
+
+        // Step 5: price list lookup
+        await runStep('getPriceList', () => this.#getPriceList());
+
+        // Step 6: attached documents (sync)
+        await runStep('getAttachedDocuments', () => Promise.resolve(this.#getAttachedDocuments()));
+
+        // Step 7: storage lookup
+        await runStep('getStorage', () => this.#getStorage());
+
+        // Step 8: business analysis (paginated - needed for steps 9+)
+        const bizStep = await runStep('getBusinessAnalysis', () => this.#getBusinessAnalysis());
+        if (bizStep.pass) {
+            businessAnalysisResult = bizStep.data;
+        }
+
+        // Step 9: details list (depends on businessAnalysis.saleAnalysis)
+        if (businessAnalysisResult?.businessAnalysis?.saleAnalysis) {
+            await runStep('getDetailsList', () => this.#getDetailsList(businessAnalysisResult.businessAnalysis.saleAnalysis));
+        } else {
+            steps.push({ step: 'getDetailsList', pass: false, skipped: true, reason: 'skipped: businessAnalysis unavailable' });
+        }
+
+        // Step 10: sale taxes (depends on businessAnalysis.taxeAnalysis)
+        if (businessAnalysisResult?.businessAnalysis?.taxeAnalysis) {
+            await runStep('getSaleTaxes', () => this.#getSaleTaxes(businessAnalysisResult.businessAnalysis.taxeAnalysis));
+        } else {
+            steps.push({ step: 'getSaleTaxes', pass: false, skipped: true, reason: 'skipped: businessAnalysis unavailable' });
+        }
+
+        const failedSteps = steps.filter(s => !s.pass);
+        return {
+            allPassed: failedSteps.length === 0,
+            passedCount: steps.filter(s => s.pass).length,
+            failedCount: failedSteps.length,
+            steps,
+            firstFailure: failedSteps[0] || null
+        };
+    }
+
     async toJSON() {
         try {
             const clientData = await this.#getClientByFileId(this.apiKey, this.clientFile);

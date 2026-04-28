@@ -176,6 +176,20 @@ function findNextWorkingDay(startMoment) {
     return d; // safety fallback
 }
 
+// Advances from startMoment until the first weekday (Mon–Fri), skipping only weekends.
+// Holidays do NOT shift the preparation day – they only block delivery dates.
+function findNextWeekday(startMoment) {
+    let d = startMoment.clone().startOf('day');
+    for (let guard = 0; guard < 14; guard++) {
+        const dow = d.day();
+        if (dow !== 0 && dow !== 6) {
+            return d;
+        }
+        d.add(1, 'day');
+    }
+    return d; // safety fallback
+}
+
 function resolveRegionalScheduleCode(comunaToSearch, region) {
     const normalizedComuna = normalizeText(comunaToSearch);
     const comunaOverride = COMUNA_REGION_SCHEDULE_OVERRIDES.get(normalizedComuna);
@@ -434,12 +448,12 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate, region = '') {
 
         // Determine effective preparation day:
         // - After cutoff: cannot start preparing until tomorrow.
-        // - Advance past any chain of non-working days (weekends + holidays),
-        //   because nobody is in the warehouse to prepare orders on those days.
+        // - Advance past weekends only; holidays shift only the delivery date
+        //   (the candidate filter), not the preparation day.
         const prepStart = isAfterCutoff
             ? emailMoment.clone().startOf('day').add(1, 'day')
             : emailMoment.clone().startOf('day');
-        const effectivePreparationDay = findNextWorkingDay(prepStart);
+        const effectivePreparationDay = findNextWeekday(prepStart);
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
         const upcomingDeliveries = [];
