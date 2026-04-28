@@ -50,6 +50,12 @@ const PEDIDOS_YA_PRODUCT_CODE_MAP = PEDIDOS_YA_PRODUCT_CODE_ENTRIES.reduce((acc,
     return acc;
 }, {});
 
+const PEDIDOS_YA_PDF_SKU_CODES = Array.from(new Set(
+    PEDIDOS_YA_PRODUCT_CODE_ENTRIES
+        .map((entry) => normalizeProductCode(entry.code))
+        .filter((code) => code.length === 6 && /[A-Z]/.test(code))
+));
+
 function normalizeText(value) {
     if (!value) {
         return '';
@@ -200,7 +206,35 @@ function normalizeHeader(value) {
     return normalizeText(value);
 }
 
-function parsePedidosYaExcelText(text) {
+function normalizeOrderNumber(value) {
+    const normalized = String(value || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .trim();
+    if (!normalized) {
+        return null;
+    }
+    const withPrefix = normalized.startsWith('PO') ? normalized : `PO${normalized}`;
+    return /^PO\d{5,}$/.test(withPrefix) ? withPrefix : null;
+}
+
+function parseDateToIso(value) {
+    const raw = String(value || '').trim();
+    if (!raw) {
+        return null;
+    }
+    const ddmmyyyy = raw.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (ddmmyyyy) {
+        return `${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`;
+    }
+    const yyyymmdd = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (yyyymmdd) {
+        return `${yyyymmdd[1]}-${yyyymmdd[2]}-${yyyymmdd[3]}`;
+    }
+    return null;
+}
+
+function parsePedidosYaLegacyExcelText(text) {
     const quantities = { ...EMPTY_ORDER_QUANTITIES };
     let hasMatch = false;
     const lines = String(text || '')
@@ -301,7 +335,7 @@ function parseBoxesFromUnitsChunk(unitsChunk, unitsPerBox) {
     return 0;
 }
 
-function parsePedidosYaPdfText(text) {
+function parsePedidosYaLegacyPdfText(text) {
     const quantities = { ...EMPTY_ORDER_QUANTITIES };
     let hasMatch = false;
     const lines = String(text || '')
@@ -342,6 +376,343 @@ function parsePedidosYaPdfText(text) {
     return hasMatch ? quantities : null;
 }
 
+function parsePedidosYaSkuExportOrdersFromText(text) {
+    const lines = String(text || '')
+        .split(/\r?\n/)
+        .map((line) => String(line || '').trim())
+        .filter(Boolean);
+
+    let headerIndex = -1;
+    let headerCols = [];
+    for (let i = 0; i < lines.length; i += 1) {
+        if (!lines[i].includes('\t')) {
+            continue;
+        }
+        const normalizedLine = normalizeText(lines[i]);
+        if (normalizedLine.includes('po number') && normalizedLine.includes('supplier sku')) {
+            headerIndex = i;
+            headerCols = lines[i].split('\t');
+            break;
+        }
+    }
+
+    if (headerIndex === -1) {
+        return [];
+    }
+
+    const cols = headerCols.map(normalizeHeader);
+    const poIdx = cols.findIndex((col) => col === 'po number' || col.includes('po number'));
+    const poCreationIdx = cols.findIndex((col) => col.includes('po creation date'));
+    const poReceivingIdx = cols.findIndex((col) => col.includes('po receiving date') || col.includes('po expected delivery at'));
+    const skuIdx = cols.findIndex((col) => col.includes('supplier sku'));
+    const barcodeIdx = cols.findIndex((col) => col === 'barcode' || col.includes('barcode'));
+    const productNameIdx = cols.findIndex((col) => col.includes('product name'));
+    const unitsPerCaseIdx = cols.findIndex((col) => col.includes('units per case'));
+    const totalCaseIdx = cols.findIndex((col) => col.includes('total ordered case'));
+    const orderedQtyIdx = cols.findIndex((col) => col.includes('ordered qty'));
+    const storeNameIdx = cols.findIndex((col) => col.includes('store name'));
+    const storeAddressIdx = cols.findIndex((col) => col.includes('store address'));
+
+    if (poIdx === -1) {
+        return [];
+    }
+
+    const groupedOrders = new Map();
+    for (let i = headerIndex + 1; i < lines.length; i += 1) {
+        if (!lines[i].includes('\t')) {
+            continue;
+        }
+        const row = lines[i].split('\t');
+        const orderNumber = normalizeOrderNumber(row[poIdx]);
+        if (!orderNumber) {
+            continue;
+        }
+
+        if (!groupedOrders.has(orderNumber)) {
+            groupedOrders.set(orderNumber, {
+                orderNumber,
+                orderDate: null,
+                deliveryDate: null,
+                storeName: '',
+                storeAddress: '',
+                quantities: { ...EMPTY_ORDER_QUANTITIES },
+                itemCount: 0,
+                rows: []
+            });
+        }
+
+        const current = groupedOrders.get(orderNumber);
+        const rowOrderDate = parseDateToIso(poCreationIdx !== -1 ? row[poCreationIdx] : null);
+        const rowDeliveryDate = parseDateToIso(poReceivingIdx !== -1 ? row[poReceivingIdx] : null);
+        const rowStoreName = String(storeNameIdx !== -1 ? row[storeNameIdx] : '').trim();
+        const rowStoreAddress = String(storeAddressIdx !== -1 ? row[storeAddressIdx] : '').trim();
+        if (!current.orderDate && rowOrderDate) current.orderDate = rowOrderDate;
+        if (!current.deliveryDate && rowDeliveryDate) current.deliveryDate = rowDeliveryDate;
+        if (!current.storeName && rowStoreName) current.storeName = rowStoreName;
+        if (!current.storeAddress && rowStoreAddress) current.storeAddress = rowStoreAddress;
+
+        const productName = String(productNameIdx !== -1 ? row[productNameIdx] : '').trim();
+        const mappingByCode = resolveProductMappingByCodes([
+            skuIdx !== -1 ? row[skuIdx] : null,
+            barcodeIdx !== -1 ? row[barcodeIdx] : null
+        ]);
+        const quantityKey = mappingByCode?.key || classifyProduct(productName);
+
+        const parsedTotalCase = totalCaseIdx !== -1 ? parseNumber(row[totalCaseIdx]) : 0;
+        const parsedOrderedQty = orderedQtyIdx !== -1 ? parseNumber(row[orderedQtyIdx]) : 0;
+        const parsedUnitsPerCase = unitsPerCaseIdx !== -1 ? parseNumber(row[unitsPerCaseIdx]) : 0;
+        const unitsPerCase = parsedUnitsPerCase || mappingByCode?.unitsPerBox || (quantityKey?.includes('_90g') ? 18 : 24);
+
+        let boxes = parsedTotalCase;
+        if (!boxes && parsedOrderedQty && unitsPerCase && parsedOrderedQty % unitsPerCase === 0) {
+            boxes = parsedOrderedQty / unitsPerCase;
+        }
+
+        const rowRecord = {
+            sku: skuIdx !== -1 ? String(row[skuIdx] || '').trim() : '',
+            barcode: barcodeIdx !== -1 ? String(row[barcodeIdx] || '').trim() : '',
+            productName,
+            totalOrderedCase: boxes,
+            orderedQty: parsedOrderedQty,
+            unitsPerCase
+        };
+        current.rows.push(rowRecord);
+
+        if (quantityKey && boxes > 0) {
+            current.quantities[quantityKey] += boxes;
+            current.itemCount += 1;
+        }
+    }
+
+    return Array.from(groupedOrders.values())
+        .sort((a, b) => String(a.orderNumber).localeCompare(String(b.orderNumber)))
+        .map((order) => {
+            const header = [
+                'po_number',
+                'po_creation_date',
+                'po_expected_delivery_at',
+                'supplier_sku',
+                'barcode',
+                'product_name',
+                'units_per_case',
+                'total_ordered_case',
+                'ordered_qty',
+                'store_name',
+                'store_address'
+            ].join('\t');
+            const rowsText = order.rows.map((row) => ([
+                order.orderNumber,
+                order.orderDate || '',
+                order.deliveryDate || '',
+                row.sku,
+                row.barcode,
+                row.productName,
+                row.unitsPerCase || '',
+                row.totalOrderedCase || '',
+                row.orderedQty || '',
+                order.storeName || '',
+                order.storeAddress || ''
+            ].join('\t'))).join('\n');
+
+            return {
+                orderNumber: order.orderNumber,
+                orderDate: order.orderDate || null,
+                deliveryDate: order.deliveryDate || null,
+                storeName: order.storeName || null,
+                storeAddress: order.storeAddress || null,
+                quantities: order.quantities,
+                itemCount: order.itemCount || 0,
+                sourceFormat: 'peya_excel_sku_export_v2',
+                orderText: `Sheet: SKU-REPORT\n${header}\n${rowsText}`.trim()
+            };
+        });
+}
+
+function decodePdfBoxesFromEaDigits(digits, unitsPerBoxHint) {
+    const cleanDigits = String(digits || '').replace(/\D/g, '');
+    if (!cleanDigits) {
+        return 0;
+    }
+
+    const hint = Number(unitsPerBoxHint);
+    let bestCandidate = null;
+
+    for (let unitsLength = 1; unitsLength <= 2; unitsLength += 1) {
+        const unitsPerCase = Number(cleanDigits.slice(0, unitsLength));
+        if (!Number.isFinite(unitsPerCase) || unitsPerCase <= 0 || unitsPerCase > 200) {
+            continue;
+        }
+
+        for (let caseLength = 1; caseLength <= 3; caseLength += 1) {
+            const caseStart = unitsLength;
+            const caseEnd = caseStart + caseLength;
+            if (caseEnd >= cleanDigits.length) {
+                continue;
+            }
+            const caseQty = Number(cleanDigits.slice(caseStart, caseEnd));
+            if (!Number.isFinite(caseQty) || caseQty <= 0) {
+                continue;
+            }
+
+            for (let orderedLength = 1; orderedLength <= 4; orderedLength += 1) {
+                const orderedStart = caseEnd;
+                const orderedEnd = orderedStart + orderedLength;
+                if (orderedEnd >= cleanDigits.length) {
+                    continue;
+                }
+                const orderedQty = Number(cleanDigits.slice(orderedStart, orderedEnd));
+                if (!Number.isFinite(orderedQty) || orderedQty <= 0) {
+                    continue;
+                }
+                if (orderedQty !== caseQty * unitsPerCase) {
+                    continue;
+                }
+
+                for (let unitCostLength = 3; unitCostLength <= 5; unitCostLength += 1) {
+                    const unitStart = orderedEnd;
+                    const unitEnd = unitStart + unitCostLength;
+                    if (unitEnd >= cleanDigits.length) {
+                        continue;
+                    }
+                    const unitCost = Number(cleanDigits.slice(unitStart, unitEnd));
+                    if (!Number.isFinite(unitCost) || unitCost <= 0) {
+                        continue;
+                    }
+
+                    for (let discountedLength = 3; discountedLength <= 5; discountedLength += 1) {
+                        const discountedStart = unitEnd;
+                        const discountedEnd = discountedStart + discountedLength;
+                        if (discountedEnd >= cleanDigits.length) {
+                            continue;
+                        }
+                        const discountedUnitCost = Number(cleanDigits.slice(discountedStart, discountedEnd));
+                        if (!Number.isFinite(discountedUnitCost) || discountedUnitCost <= 0) {
+                            continue;
+                        }
+
+                        const amountDigits = cleanDigits.slice(discountedEnd);
+                        if (!amountDigits || amountDigits.length < 4) {
+                            continue;
+                        }
+                        const amountExclTax = Number(amountDigits);
+                        if (!Number.isFinite(amountExclTax) || amountExclTax <= 0) {
+                            continue;
+                        }
+
+                        const expectedAmount = orderedQty * discountedUnitCost;
+                        const amountDiff = Math.abs(amountExclTax - expectedAmount);
+                        const unitsPenalty = Number.isFinite(hint) && hint > 0 && unitsPerCase !== hint ? 1000000 : 0;
+                        const score = amountDiff + unitsPenalty;
+
+                        if (!bestCandidate || score < bestCandidate.score) {
+                            bestCandidate = {
+                                score,
+                                caseQty
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return bestCandidate?.caseQty || 0;
+}
+
+function parsePedidosYaPdfOrdersFromText(text) {
+    const rawText = String(text || '');
+    if (!rawText.trim()) {
+        return [];
+    }
+
+    const orderNumber = normalizeOrderNumber(extractOrderNumberFromText(rawText));
+    if (!orderNumber) {
+        return [];
+    }
+
+    const compactText = rawText.replace(/\s+/g, '');
+    const orderDateMatch = compactText.match(new RegExp(`${orderNumber}(\\d{2}\\/\\d{2}\\/\\d{4})\\d{1,2}:\\d{2}(\\d{2}\\/\\d{2}\\/\\d{4})`));
+    const orderDate = parseDateToIso(orderDateMatch?.[1] || null);
+    const deliveryDate = parseDateToIso(orderDateMatch?.[2] || null);
+
+    const lines = rawText
+        .split(/\r?\n/)
+        .map((line) => String(line || '').trim())
+        .filter(Boolean);
+    let storeName = null;
+    let storeAddress = null;
+    const storeInfoIndex = lines.findIndex((line) => normalizeText(line) === 'store information');
+    if (storeInfoIndex !== -1) {
+        const nextLine = String(lines[storeInfoIndex + 1] || '').trim();
+        if (nextLine) {
+            storeName = nextLine;
+        }
+        const addressParts = [];
+        for (let i = storeInfoIndex + 2; i < lines.length; i += 1) {
+            const normalized = normalizeText(lines[i]);
+            if (normalized.includes('order number') && normalized.includes('order date')) {
+                break;
+            }
+            addressParts.push(String(lines[i] || '').trim());
+        }
+        storeAddress = addressParts.join(' ').trim() || null;
+    }
+
+    const quantities = { ...EMPTY_ORDER_QUANTITIES };
+    let itemCount = 0;
+    const skuPattern = PEDIDOS_YA_PDF_SKU_CODES.join('|');
+    if (!skuPattern) {
+        return [];
+    }
+
+    const rowRegex = new RegExp(
+        `\\d(${skuPattern})(\\d{12,14})([\\s\\S]*?)(?=\\d(?:${skuPattern})\\d{12,14}|TotalAmt(?:\\\\.Excl\\\\.Tax|ExclTax):|$)`,
+        'g'
+    );
+    const seenRows = new Set();
+    let rowMatch;
+    while ((rowMatch = rowRegex.exec(compactText)) !== null) {
+        const sku = rowMatch[1];
+        const barcode = rowMatch[2];
+        const tail = rowMatch[3];
+        const rowKey = `${sku}:${barcode}:${tail.slice(0, 40)}`;
+        if (seenRows.has(rowKey)) {
+            continue;
+        }
+        seenRows.add(rowKey);
+
+        const mappingByCode = resolveProductMappingByCodes([sku, barcode]);
+        if (!mappingByCode) {
+            continue;
+        }
+
+        const eaMatch = tail.match(/EA(\d+)0%19(?:[.,]00)?%/);
+        if (!eaMatch) {
+            continue;
+        }
+
+        const boxes = decodePdfBoxesFromEaDigits(eaMatch[1], mappingByCode.unitsPerBox);
+        if (!boxes) {
+            continue;
+        }
+
+        quantities[mappingByCode.key] += boxes;
+        itemCount += 1;
+    }
+
+    return [{
+        orderNumber,
+        orderDate: orderDate || null,
+        deliveryDate: deliveryDate || null,
+        storeName,
+        storeAddress,
+        quantities,
+        itemCount,
+        sourceFormat: 'peya_pdf_purchase_order_v2',
+        orderText: rawText
+    }];
+}
+
 function detectPedidosYaAttachmentType(payload) {
     const attachmentFilename = String(payload?.attachmentFilename || '').toLowerCase();
     const mimeType = String(payload?.mimeType || payload?.attachmentMimeType || '').toLowerCase();
@@ -367,26 +738,77 @@ function detectPedidosYaAttachmentType(payload) {
     return 'unknown';
 }
 
+function extractPedidosYaOrdersFromAttachment(emailContent) {
+    try {
+        const payload = typeof emailContent === 'string' ? JSON.parse(emailContent) : emailContent;
+        if (!payload || typeof payload !== 'object') {
+            return [];
+        }
+
+        const emailAttached = payload.emailAttached;
+        if (!emailAttached || typeof emailAttached !== 'string') {
+            return [];
+        }
+
+        const attachmentType = detectPedidosYaAttachmentType(payload);
+        if (attachmentType === 'excel') {
+            const orders = parsePedidosYaSkuExportOrdersFromText(emailAttached);
+            if (orders.length > 0) {
+                return orders;
+            }
+        }
+        if (attachmentType === 'pdf') {
+            const orders = parsePedidosYaPdfOrdersFromText(emailAttached);
+            if (orders.length > 0) {
+                return orders;
+            }
+        }
+
+        const fallbackOrderNumber = extractOrderNumberFromText(payload.attachmentFilename)
+            || extractOrderNumberFromText(emailAttached)
+            || extractOrderNumberFromText(payload.emailSubject)
+            || extractOrderNumberFromText(payload.emailBody);
+        const fallbackQuantities = parsePedidosYaLegacyExcelText(emailAttached) || parsePedidosYaLegacyPdfText(emailAttached);
+        if (!fallbackOrderNumber && !fallbackQuantities) {
+            return [];
+        }
+        return [{
+            orderNumber: fallbackOrderNumber || null,
+            orderDate: null,
+            deliveryDate: null,
+            storeName: null,
+            storeAddress: null,
+            quantities: fallbackQuantities || { ...EMPTY_ORDER_QUANTITIES },
+            itemCount: 0,
+            sourceFormat: 'peya_legacy_fallback',
+            orderText: String(emailAttached || '')
+        }];
+    } catch (error) {
+        return [];
+    }
+}
+
 function parsePedidosYaOrderQuantities(emailContent) {
     try {
-        const payload = JSON.parse(emailContent);
+        const payload = typeof emailContent === 'string' ? JSON.parse(emailContent) : emailContent;
         if (!payload || typeof payload !== 'object') {
             return null;
+        }
+        const targetOrderNumber = normalizeOrderNumber(
+            payload?.manualOc?.targetOrderNumber || payload?.targetOrderNumber
+        );
+        const orders = extractPedidosYaOrdersFromAttachment(payload);
+        if (orders.length > 0) {
+            const selectedOrder = targetOrderNumber
+                ? orders.find((order) => normalizeOrderNumber(order.orderNumber) === targetOrderNumber) || null
+                : orders[0];
+            return selectedOrder?.quantities || null;
         }
         const emailAttached = payload.emailAttached;
         if (!emailAttached || typeof emailAttached !== 'string') {
             return null;
         }
-
-        const attachmentType = detectPedidosYaAttachmentType(payload);
-        if (attachmentType === 'pdf') {
-            return parsePedidosYaPdfText(emailAttached) || parsePedidosYaExcelText(emailAttached);
-        }
-        if (attachmentType === 'excel') {
-            return parsePedidosYaExcelText(emailAttached) || parsePedidosYaPdfText(emailAttached);
-        }
-
-        return parsePedidosYaExcelText(emailAttached) || parsePedidosYaPdfText(emailAttached);
+        return parsePedidosYaLegacyExcelText(emailAttached) || parsePedidosYaLegacyPdfText(emailAttached);
     } catch (error) {
         return null;
     }
@@ -410,6 +832,23 @@ function extractPedidosYaOrderNumber(emailContent) {
         const payload = typeof emailContent === 'string' ? JSON.parse(emailContent) : emailContent;
         if (!payload || typeof payload !== 'object') {
             return null;
+        }
+        const targetOrderNumber = normalizeOrderNumber(
+            payload?.manualOc?.targetOrderNumber || payload?.targetOrderNumber
+        );
+        const parsedOrders = extractPedidosYaOrdersFromAttachment(payload);
+        if (parsedOrders.length > 0) {
+            if (targetOrderNumber) {
+                const targetOrder = parsedOrders.find(
+                    (order) => normalizeOrderNumber(order.orderNumber) === targetOrderNumber
+                );
+                if (targetOrder?.orderNumber) {
+                    return normalizeOrderNumber(targetOrder.orderNumber);
+                }
+            }
+            if (parsedOrders[0]?.orderNumber) {
+                return normalizeOrderNumber(parsedOrders[0].orderNumber);
+            }
         }
 
         const candidates = [
@@ -577,5 +1016,6 @@ export {
     analyzeOrderEmail,
     analyzeOrderEmailFromGmail,
     parsePedidosYaOrderQuantities,
-    extractPedidosYaOrderNumber
+    extractPedidosYaOrderNumber,
+    extractPedidosYaOrdersFromAttachment
 };

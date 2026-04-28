@@ -19,6 +19,7 @@ import bannerRoutes from './src/routes/bannerRouter.js';
 import { fileURLToPath } from 'url';
 import moment from 'moment';
 import { startDeliveryCapacityCleanupCron } from './src/services/deliveryCapacityService.js';
+import { syncKnowledgebase } from './src/services/sheetsSyncService.js';
 
 import findDeliveryDayByComuna from './src/utils/findDeliveryDate.js'; // Import the function
 // moment.tz.setDefault('America/Santiago'); // Set default timezone to Chile's timezone
@@ -212,4 +213,19 @@ startDeliveryCapacityCleanupCron({
 const PORT = process.env.PORT || 5000;
 app.listen(5000, () => {
   console.log(`Server is running on port ${PORT}`);
+
+  // Sync periódico Sheet → MongoDB (opt-in: solo si SHEETS_SYNC_INTERVAL_HOURS > 0)
+  const syncIntervalHours = Number(process.env.SHEETS_SYNC_INTERVAL_HOURS || 0);
+  if (syncIntervalHours > 0) {
+    const intervalMs = syncIntervalHours * 60 * 60 * 1000;
+    console.log(`[sheetsSync] Sync automático configurado cada ${syncIntervalHours}h`);
+    setInterval(async () => {
+      try {
+        const stats = await syncKnowledgebase();
+        console.log('[sheetsSync] Sync periódico completado:', stats);
+      } catch (err) {
+        console.error('[sheetsSync] Error en sync periódico:', err.message);
+      }
+    }, intervalMs);
+  }
 });

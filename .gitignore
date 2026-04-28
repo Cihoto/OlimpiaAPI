@@ -1,5 +1,9 @@
 *.env
 /node_modules
+
+# Credenciales Google (NUNCA versionar)
+/credentials/
+
 /src/routes/google.js
 /src/routes/google.js
 /src/middleware/Credentials
@@ -12,6 +16,11 @@ src/documents/ASDASDASDAS.csv
 /mock
 /scripts
 /src/tools/deliveryVisibilityReport.js
+
+# Scripts y archivos de prueba / exploración local
+/tmp/
+/src/__tests__/
+/docs/
 
 # Codex local config
 /.codex/

@@ -7,7 +7,8 @@ import {
     readManualOcExtractDate,
     readManualOcPreview,
     readManualOcDispatchPreview,
-    readManualOcSubmit
+    readManualOcSubmit,
+    syncKnowledgebaseHandler
 } from '../controllers/helpersController.js';
 
 const router = Router();
@@ -21,5 +22,6 @@ router.post('/manual-oc/extract-date', readManualOcExtractDate);
 router.post('/manual-oc/preview', readManualOcPreview);
 router.post('/manual-oc/dispatch-preview', readManualOcDispatchPreview);
 router.post('/manual-oc/submit', readManualOcSubmit);
+router.post('/sync-knowledgebase', syncKnowledgebaseHandler);
 
 export default router;

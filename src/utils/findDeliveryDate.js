@@ -51,13 +51,62 @@ const REGIONAL_BIWEEKLY_SCHEDULES = Object.freeze({
 });
 
 const BLOCKED_DELIVERY_DATES = new Set([
-    '2026-04-03' // Viernes Santo (Chile)
+    '2026-04-03' // Viernes Santo (Chile) - moveable feast, add each year
+]);
+
+// Recurring annual holidays (MM-DD, year-independent).
+// These block deliveries AND shift the effective preparation day to the next
+// working day, so orders cannot be prepared on these dates either.
+const ANNUAL_HOLIDAYS = new Set([
+    '05-01', // Día del Trabajador
+    '05-21', // Glorias Navales
+    '09-18', // Fiestas Patrias
+    '09-19', // Día de las Glorias del Ejército
+    '10-12', // Día del Encuentro de Dos Mundos
+    '12-25', // Navidad
 ]);
 
 const COMUNA_REGION_SCHEDULE_OVERRIDES = new Map([
+    // Region V (Valparaíso) – explicit commune list as safety net
+    // (also detected via 'Región Despacho' = 'Valparaíso' in client CSV)
     ['curacavi', 'V'],
+    ['valparaiso', 'V'],
+    ['vina del mar', 'V'],
+    ['curauma', 'V'],
+    ['concon', 'V'],
+    ['renaca', 'V'],
+    ['renaca bajo', 'V'],
+    ['villa alemana', 'V'],
+    ['quilpue', 'V'],
+    ['algarrobo', 'V'],
+    ['casa blanca', 'V'],
+    ['recreo', 'V'],
+    ['santo domingo', 'V'],
+    ['zapallar', 'V'],
+    ['papudo', 'V'],
+    ['quillota', 'V'],
+    ['la ligua', 'V'],
+    ['los andes', 'V'],
+    ['san antonio', 'V'],
+    ['cartagena', 'V'],
+    ['el quisco', 'V'],
+    ['el tabo', 'V'],
+    ['isla negra', 'V'],
+    // Region VI (O'Higgins) – explicit commune list as safety net
     ['buin', 'VI'],
-    ['linderos', 'VI']
+    ['linderos', 'VI'],
+    ['rancagua', 'VI'],
+    ['machali', 'VI'],
+    ['san fernando', 'VI'],
+    ['requinoa', 'VI'],
+    ['pichilemu', 'VI'],
+    ['navidad', 'VI'],
+    ['santa cruz', 'VI'],
+    ['chimbarongo', 'VI'],
+    ['graneros', 'VI'],
+    ['coinco', 'VI'],
+    ['doñihue', 'VI'],
+    ['donihue', 'VI'],
 ]);
 
 function normalizeText(value) {
@@ -101,7 +150,30 @@ function isBlockedDeliveryDate(dateValue) {
         ? dateValue.format('YYYY-MM-DD')
         : String(dateValue).trim().slice(0, 10);
 
-    return BLOCKED_DELIVERY_DATES.has(normalizedDate);
+    if (BLOCKED_DELIVERY_DATES.has(normalizedDate)) {
+        return true;
+    }
+    // Check recurring annual holidays by MM-DD (year-independent)
+    return ANNUAL_HOLIDAYS.has(normalizedDate.slice(5));
+}
+
+// Returns true for any day where the warehouse does not operate:
+// weekends, specific blocked dates, and recurring annual holidays.
+function isNonWorkingDay(dateMoment) {
+    const dow = dateMoment.day(); // 0 = Sunday, 6 = Saturday
+    return dow === 0 || dow === 6 || isBlockedDeliveryDate(dateMoment);
+}
+
+// Advances from startMoment until the first working day (inclusive).
+function findNextWorkingDay(startMoment) {
+    let d = startMoment.clone().startOf('day');
+    for (let guard = 0; guard < 14; guard++) {
+        if (!isNonWorkingDay(d)) {
+            return d;
+        }
+        d.add(1, 'day');
+    }
+    return d; // safety fallback
 }
 
 function resolveRegionalScheduleCode(comunaToSearch, region) {
@@ -131,7 +203,10 @@ function findNextBiweeklyRegionalDeliveryDay(scheduleCode, emailMoment) {
     }
 
     const orderDayStart = emailMoment.clone().startOf('day');
-    const isAfterCutoff = emailMoment.hour() >= REGIONAL_DELIVERY_CUTOFF_HOUR;
+    // Minute-precision cutoff: an order placed at exactly the cutoff hour (e.g. 13:00:00)
+    // is NOT considered late – only orders strictly after that minute are.
+    const orderMinutes = emailMoment.hour() * 60 + emailMoment.minute();
+    const isAfterCutoff = orderMinutes > REGIONAL_DELIVERY_CUTOFF_HOUR * 60;
 
     // Business rule: never same-day for region routes.
     let candidate = anchorMoment.clone();
@@ -353,19 +428,27 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate, region = '') {
 
         console.log(`Debe ser traido a la zona horaria de Chile ${emailMoment}`);
 
-        const emailDateDayIndex = emailMoment.day();
-        const emailDateHour = emailMoment.hour();
-        const isWeekend = emailDateDayIndex === 6 || emailDateDayIndex === 0;
-        const isFriday = emailDateDayIndex === 5;
-        const isAfterCutoff = emailDateHour >= RM_DELIVERY_CUTOFF_HOUR;
-        const isWeekendLikeBlock = (isFriday && isAfterCutoff) || isWeekend;
+        // Minute-precision cutoff check for RM routes
+        const orderMinutes = emailMoment.hour() * 60 + emailMoment.minute();
+        const isAfterCutoff = orderMinutes > RM_DELIVERY_CUTOFF_HOUR * 60;
+
+        // Determine effective preparation day:
+        // - After cutoff: cannot start preparing until tomorrow.
+        // - Advance past any chain of non-working days (weekends + holidays),
+        //   because nobody is in the warehouse to prepare orders on those days.
+        const prepStart = isAfterCutoff
+            ? emailMoment.clone().startOf('day').add(1, 'day')
+            : emailMoment.clone().startOf('day');
+        const effectivePreparationDay = findNextWorkingDay(prepStart);
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
         const upcomingDeliveries = [];
 
         for (let offset = 1; offset <= 14; offset++) {
             const candidate = emailMoment.clone().add(offset, 'day');
-            if (deliveryDayIndexSet.has(candidate.day()) && !isBlockedDeliveryDate(candidate)) {
+            if (deliveryDayIndexSet.has(candidate.day())
+                && !isBlockedDeliveryDate(candidate)
+                && candidate.isAfter(effectivePreparationDay, 'day')) {
                 upcomingDeliveries.push(candidate);
             }
         }
@@ -374,20 +457,7 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate, region = '') {
             return null;
         }
 
-        let selectedDelivery = upcomingDeliveries[0];
-
-        if (isWeekendLikeBlock) {
-            const hasMondayDelivery = deliveryDayIndexSet.has(1);
-            if (hasMondayDelivery && selectedDelivery.day() === 1 && upcomingDeliveries[1]) {
-                selectedDelivery = upcomingDeliveries[1];
-            }
-        } else if (isAfterCutoff && upcomingDeliveries[1]) {
-            const diffToFirst = upcomingDeliveries[0].diff(emailMoment.clone().startOf('day'), 'days');
-            // Weekday rule: only skip to the next slot if the closest delivery is tomorrow.
-            if (diffToFirst === 1) {
-                selectedDelivery = upcomingDeliveries[1];
-            }
-        }
+        const selectedDelivery = upcomingDeliveries[0];
 
         const formattedDate = selectedDelivery.format("YYYY-MM-DD");
         console.log("date", formattedDate);

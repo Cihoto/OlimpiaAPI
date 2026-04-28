@@ -148,7 +148,7 @@ function buildReservationFingerprint({
         ).trim().toLowerCase(),
         direccion: String(
             emailData?.Direccion_despacho ||
-            getClientField(clientRecord, ['Dirección Despacho', 'DirecciÃ³n Despacho'])
+            getClientField(clientRecord, ['Direccion Despacho', 'Direccion Despacho'])
         ).trim().toLowerCase(),
         ocNumber: String(emailData?.Orden_de_Compra || '').trim().toLowerCase(),
         requestedDeliveryDay: String(requestedDeliveryDay || '').trim(),
@@ -187,7 +187,7 @@ function buildReservationContext({ emailData, clientData, emailContext }) {
             ).trim(),
             direccionDespacho: String(
                 emailData?.Direccion_despacho ||
-                getClientField(clientRecord, ['Dirección Despacho', 'DirecciÃ³n Despacho'])
+                getClientField(clientRecord, ['Direccion Despacho', 'Direccion Despacho'])
             ).trim(),
             comuna: String(
                 emailData?.Comuna ||

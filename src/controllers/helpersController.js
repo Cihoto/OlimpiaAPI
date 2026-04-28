@@ -1,7 +1,7 @@
-import fs from 'fs';
+﻿import fs from 'fs';
 import path from 'path';
 import { createHash, randomUUID } from 'crypto';
-import csvParser from 'csv-parser';
+import { getClientsByRut, getAllClients } from '../services/mongoClientDataService.js';
 import OpenAI from 'openai';
 import moment from 'moment';
 import XLSX from 'xlsx';
@@ -13,7 +13,8 @@ import {
     analyzeOrderEmail,
     analyzeOrderEmailFromGmail,
     extractPedidosYaOrderNumber,
-    parsePedidosYaOrderQuantities
+    parsePedidosYaOrderQuantities,
+    extractPedidosYaOrdersFromAttachment
 } from '../services/analyzeOrderEmail.js'; // Import the function to analyze order email
 import { parseKeyLogisticsOrderText, EMPTY_ORDER_QUANTITIES } from '../services/keyLogisticsOrderParser.js';
 import { parseRappiTurboOrderText } from '../services/rappiTurboOrderParser.js';
@@ -32,6 +33,10 @@ import {
     findLatestManualOcByDetectedOrderNumber
 } from '../services/mongoManualOcRegistry.js';
 import {
+    acquireManualOcSubmitLock,
+    releaseManualOcSubmitLock
+} from '../services/mongoManualOcSubmitLockRegistry.js';
+import {
     buildGmailClient,
     decodeBase64Url,
     extractEmailAddress,
@@ -40,10 +45,29 @@ import {
     findPdfAttachments,
     headersToMap
 } from '../utils/Google/gmail.js';
+import {
+    buildManualOcBatchAnalysis,
+    buildManualOcSuccessAnalysis,
+    classifyManualOcParserFailure
+} from '../utils/manualOcAnalysis.js';
 
 function isManualOcDeveloperFlagEnabled(value) {
     const normalized = String(value || '').trim().toLowerCase();
-    return ['1', 'true', 'yes', 'y', 'si', 'sÃ­', 'on'].includes(normalized);
+    return ['1', 'true', 'yes', 'y', 'si', 'sí', 'on'].includes(normalized);
+}
+
+function parseEnvBooleanLoose(value, fallback = false) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === '') {
+        return fallback;
+    }
+    if (['1', 'true', 'yes', 'y', 'si', 'sí', 'on'].includes(normalized)) {
+        return true;
+    }
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) {
+        return false;
+    }
+    return fallback;
 }
 
 const client = new OpenAI();
@@ -53,6 +77,12 @@ const KEY_LOGISTICS_SENDER = 'fax@keylogistics.cl';
 const PEDIDOS_YA_SENDER = 'compras.marketds@pedidosya.com';
 const RAPPI_TURBO_SENDER = 'tomas.bravo@rappi.com';
 const MAKE_MANUAL_OC_WEBHOOK_URL = process.env.MAKE_MANUAL_OC_WEBHOOK_URL || '';
+const MANUAL_OC_MAKE_MODE_DEFAULT = String(process.env.MANUAL_OC_MAKE_MODE || 'TEST_ONLY').trim() || 'TEST_ONLY';
+const MANUAL_OC_MAKE_TEST_MODE_DEFAULT = parseEnvBooleanLoose(process.env.MANUAL_OC_MAKE_TEST_MODE, true);
+const MANUAL_OC_MAKE_PREVENT_BILLING_DEFAULT = parseEnvBooleanLoose(
+    process.env.MANUAL_OC_MAKE_PREVENT_BILLING,
+    true
+);
 const MANUAL_OC_DEVELOPER_MODE_DEFAULT = isManualOcDeveloperFlagEnabled(
     process.env.MANUAL_OC_DEVELOPER_MODE || process.env.MANUAL_OC_DEV_MODE || ''
 );
@@ -79,6 +109,45 @@ const MANUAL_OC_PROCESSED_STATUSES = Object.freeze([
     'submitted_to_make',
     'submit_skipped_make'
 ]);
+const ADDRESS_MATCH_MIN_CONFIDENCE = (() => {
+    const rawValue = Number.parseInt(process.env.ADDRESS_MATCH_MIN_CONFIDENCE || '75', 10);
+    if (!Number.isFinite(rawValue)) {
+        return 75;
+    }
+    return Math.max(0, Math.min(100, rawValue));
+})();
+const ADDRESS_MATCH_MIN_SCORE = (() => {
+    const rawValue = Number.parseFloat(process.env.ADDRESS_MATCH_MIN_SCORE || '0.75');
+    if (!Number.isFinite(rawValue)) {
+        return 0.75;
+    }
+    return Math.max(0, Math.min(1, rawValue));
+})();
+const ADDRESS_MATCH_GPT_MODELS = (() => {
+    const configuredModels = String(
+        process.env.ADDRESS_MATCH_GPT_MODELS
+        || process.env.GPT_ADDRESS_MATCH_MODELS
+        || 'gpt-5,gpt-5-mini'
+    )
+        .split(',')
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+    return configuredModels.length > 0 ? configuredModels : ['gpt-5-mini'];
+})();
+const ADDRESS_MATCH_LLM_FALLBACK_MIN_SCORE = (() => {
+    const rawValue = Number.parseFloat(process.env.ADDRESS_MATCH_LLM_FALLBACK_MIN_SCORE || '0.55');
+    if (!Number.isFinite(rawValue)) {
+        return 0.55;
+    }
+    return Math.max(0, Math.min(1, rawValue));
+})();
+const ADDRESS_MATCH_LLM_FALLBACK_TOPN = (() => {
+    const rawValue = Number.parseInt(process.env.ADDRESS_MATCH_LLM_FALLBACK_TOPN || '5', 10);
+    if (!Number.isFinite(rawValue) || rawValue <= 0) {
+        return 5;
+    }
+    return Math.min(20, rawValue);
+})();
 
 const MANUAL_OC_DETAIL_MAPPING = Object.freeze([
     Object.freeze({ quantityKey: 'Pedido_Cantidad_Amargo', code: '17798147780069', priceBucket: '150' }),
@@ -260,6 +329,50 @@ function buildManualOcPayloadForQuantities({ fileName, mimeType, text }) {
     });
 }
 
+function buildManualOcAttachmentPayload({ fileName, mimeType, text, targetOrderNumber = null }) {
+    return {
+        attachmentFilename: String(fileName || ''),
+        mimeType: String(mimeType || ''),
+        emailAttached: String(text || ''),
+        emailBody: '',
+        emailSubject: '',
+        targetOrderNumber: targetOrderNumber || null,
+        manualOc: {
+            targetOrderNumber: targetOrderNumber || null
+        }
+    };
+}
+
+function buildManualOcSyntheticAnalysisFromExtractedOrder(order) {
+    const safeOrder = order || {};
+    return {
+        pattern: safeOrder.sourceFormat || null,
+        purchaseOrderNumber: normalizeManualOcOrderNumber(safeOrder.orderNumber),
+        metadata: {
+            store: safeOrder.storeName || null,
+            direccionEntrega: safeOrder.storeAddress || null
+        },
+        dates: {
+            fechaEmision: parseManualDateCandidate(safeOrder.orderDate),
+            fechaEntrega: parseManualDateCandidate(safeOrder.deliveryDate)
+        },
+        itemStats: {
+            count: toPositiveInteger(safeOrder.itemCount),
+            quantityBoxesTotal: toPositiveInteger(
+                (safeOrder.quantities?.Pedido_Cantidad_Pink || 0)
+                + (safeOrder.quantities?.Pedido_Cantidad_Amargo || 0)
+                + (safeOrder.quantities?.Pedido_Cantidad_Leche || 0)
+                + (safeOrder.quantities?.Pedido_Cantidad_Free || 0)
+                + (safeOrder.quantities?.Pedido_Cantidad_Pink_90g || 0)
+                + (safeOrder.quantities?.Pedido_Cantidad_Amargo_90g || 0)
+                + (safeOrder.quantities?.Pedido_Cantidad_Leche_90g || 0)
+            ),
+            quantityUnitsTotal: 0
+        },
+        items: []
+    };
+}
+
 function buildManualOcComparableSnapshot({
     detectedOrderNumber,
     quantities,
@@ -372,10 +485,10 @@ const KEY_LOGISTICS_CLIENT_MASTER_DATA = Object.freeze({
         NAME: 'Key Logistics (ENEX)',
         'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
         RUT: KEY_LOGISTICS_FIXED_RUT,
-        'Dirección Facturación': 'Pio XI 1290',
-        'Dirección Despacho': 'av lo espejo 01740, Bodega 3',
+        'Direccion Facturación': 'Pio XI 1290',
+        'Direccion Despacho': 'av lo espejo 01740, Bodega 3',
         'Comuna Despacho': 'San Bernardo',
-        'Región Despacho': 'Santiago',
+        'Region Despacho': 'Santiago',
         'Horario Despacho': '08:00 - 13:00',
         'Precio Caja': 74160,
         diasCredito: '30',
@@ -394,10 +507,10 @@ const KEY_LOGISTICS_CLIENT_MASTER_DATA = Object.freeze({
         NAME: 'Key Logistics (ESMAX)',
         'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
         RUT: KEY_LOGISTICS_FIXED_RUT,
-        'Dirección Facturación': 'Pio XI 1290',
-        'Dirección Despacho': 'av lo espejo 01740, Bodega 3',
+        'Direccion Facturación': 'Pio XI 1290',
+        'Direccion Despacho': 'av lo espejo 01740, Bodega 3',
         'Comuna Despacho': 'San Bernardo',
-        'Región Despacho': 'Santiago',
+        'Region Despacho': 'Santiago',
         'Horario Despacho': '08:00 - 13:00',
         'Precio Caja': 79200,
         diasCredito: '30',
@@ -416,10 +529,10 @@ const KEY_LOGISTICS_CLIENT_MASTER_DATA = Object.freeze({
         NAME: 'Key Logistics (OXXO)',
         'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
         RUT: KEY_LOGISTICS_FIXED_RUT,
-        'Dirección Facturación': 'Pio XI 1290',
-        'Dirección Despacho': 'lago riñihue 2319',
+        'Direccion Facturación': 'Pio XI 1290',
+        'Direccion Despacho': 'lago riñihue 2319',
         'Comuna Despacho': 'San Bernardo',
-        'Región Despacho': 'Santiago',
+        'Region Despacho': 'Santiago',
         'Horario Despacho': '08:00 - 13:00',
         'Precio Caja': 84480,
         diasCredito: '30',
@@ -438,10 +551,10 @@ const KEY_LOGISTICS_CLIENT_MASTER_DATA = Object.freeze({
         NAME: 'Key Logistics (Pronto Copec)',
         'RAZ\u00d3N SOCIAL': 'KEYLOGISTICS CHILE S A',
         RUT: KEY_LOGISTICS_FIXED_RUT,
-        'Dirección Facturación': 'Avenida Lo Espejo 01740, Bodega 3, San Bernardo',
-        'Dirección Despacho': 'Avenida Lo Espejo 01740, Bodega 3',
+        'Direccion Facturación': 'Avenida Lo Espejo 01740, Bodega 3, San Bernardo',
+        'Direccion Despacho': 'Avenida Lo Espejo 01740, Bodega 3',
         'Comuna Despacho': 'San Bernardo',
-        'Región Despacho': 'Santiago',
+        'Region Despacho': 'Santiago',
         'Horario Despacho': '08:00 - 13:00',
         'Precio Caja': 90960,
         diasCredito: '15',
@@ -471,7 +584,7 @@ function buildKeyLogisticsClientData(clientId, emailDate, extractedBoxPrice) {
     );
     if (deliveryDay != null) {
         data.deliveryDay = `${deliveryDay}`;
-    } else if (String(data['Dirección Despacho'] || '').toLowerCase() === 'retiro') {
+    } else if (String(data['Direccion Despacho'] || '').toLowerCase() === 'retiro') {
         data.deliveryDay = moment().add(1, 'days').format('YYYY-MM-DD');
     } else {
         data.deliveryDay = '';
@@ -532,10 +645,10 @@ function normalizeClientRecord(raw) {
     const normalizeKey = (k) => k.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
     const mapKey = (k) => {
-        if (k.includes('direccion') && k.includes('despacho')) return 'Dirección Despacho';
-        if (k.includes('direccion') && k.includes('facturacion')) return 'Dirección Facturación';
+        if (k.includes('direccion') && k.includes('despacho')) return 'Direccion Despacho';
+        if (k.includes('direccion') && k.includes('facturacion')) return 'Direccion Facturacion';
         if (k.includes('comuna')) return 'Comuna Despacho';
-        if (k.includes('region') || (k.includes('region') && k.includes('despacho')) || (k.includes('reg') && k.includes('despacho'))) return 'Región Despacho';
+        if (k.includes('region') || (k.includes('region') && k.includes('despacho')) || (k.includes('reg') && k.includes('despacho'))) return 'Region Despacho';
         if (k.includes('precio') && k.includes('caja 90')) return 'Precio Caja 90';
         if (k.includes('precio') && k.includes('90')) return 'Precio Caja 90';
         if (k.includes('precio') && k.includes('free')) return 'Precio Caja Free';
@@ -629,7 +742,7 @@ async function readCSV(req, res) {
                 if (!address) {
                     // If no address is provided, return all results but address as false
                     const first = results[0];
-                    first['Dirección Despacho'] = "";
+                    first['Direccion Despacho'] = "";
                     res.status(200).json({
                         data: first,
                         length: results.length,
@@ -642,7 +755,7 @@ async function readCSV(req, res) {
                 const clientData = results.map((item, index) => {
                     return {
                         index: index,
-                        direccion: item['Dirección Despacho'],
+                        direccion: resolveClientDispatchAddress(item),
                     }
                 });
                 const gptResponse = await integrateWithChatGPT(clientData, address); // Integrate with ChatGPT
@@ -657,18 +770,25 @@ async function readCSV(req, res) {
                     return;
                 }
 
-                const matched = gptResponse.find((item) => item.match === true);
+                const matched = gptResponse
+                    .filter((item) => item.match === true)
+                    .sort((a, b) => Number(b?.confidence || 0) - Number(a?.confidence || 0))[0];
+                const matchConfidence = Number(matched?.confidence || 0);
                 const found = results.find((result, index) => {
-                    return index == (matched.index)
+                    return index == (matched?.index)
                 });
 
-                if (!found) {
+                if (!found || matchConfidence < ADDRESS_MATCH_MIN_CONFIDENCE) {
                     console.log("no se encontro nada")
                     res.status(200).json({
                         data: found,
                         length: [found].length,
                         address: address ? true : false,
-                        message: "No se encontro nada"
+                        message: !found
+                            ? "No se encontro nada"
+                            : `Coincidencia descartada por baja confianza (${matchConfidence} < ${ADDRESS_MATCH_MIN_CONFIDENCE})`,
+                        matchConfidence,
+                        matchMinConfidence: ADDRESS_MATCH_MIN_CONFIDENCE
                     })
                     return;
                 }
@@ -679,6 +799,8 @@ async function readCSV(req, res) {
                     length: [found].length,
                     address: true,
                     message: "Se encontro una coincidencia",
+                    matchConfidence,
+                    matchMinConfidence: ADDRESS_MATCH_MIN_CONFIDENCE
                 });
                 return;
             });
@@ -974,10 +1096,18 @@ function findPeyaItemHeaderRow(normalizedRows) {
     for (let rowIndex = 0; rowIndex < normalizedRows.length; rowIndex += 1) {
         const row = normalizedRows[rowIndex];
         const labels = row.map((cell) => normalizePreviewLabel(cell));
+        // Spanish per-OC format
         const hasSku = labels.some((label) => label === 'n sku' || label === 'sku');
         const hasDescription = labels.some((label) => label === 'descripcion');
         const hasQty = labels.some((label) => label.includes('cantidad cajas') || label.includes('cantidad unidades'));
         if (hasSku && hasDescription && hasQty) {
+            return rowIndex;
+        }
+        // English multi-OC SKU export format (sku_id / product_name / total_ordered_case)
+        const hasSkuId = labels.some((label) => label === 'sku id');
+        const hasProductName = labels.some((label) => label === 'product name');
+        const hasOrderedCase = labels.some((label) => label === 'total ordered case' || label === 'ordered qty');
+        if (hasSkuId && hasProductName && hasOrderedCase) {
             return rowIndex;
         }
     }
@@ -993,35 +1123,35 @@ function mapPeyaItemColumns(headerRow) {
             return;
         }
 
-        if (columnMap.sku === undefined && (label === 'n sku' || label === 'sku')) {
+        if (columnMap.sku === undefined && (label === 'n sku' || label === 'sku' || label === 'sku id')) {
             columnMap.sku = colIndex;
             return;
         }
-        if (columnMap.ean === undefined && label === 'ean') {
+        if (columnMap.ean === undefined && (label === 'ean' || label === 'barcode')) {
             columnMap.ean = colIndex;
             return;
         }
-        if (columnMap.internalCode === undefined && label.includes('codigo interno proveedor')) {
+        if (columnMap.internalCode === undefined && (label.includes('codigo interno proveedor') || label === 'supplier sku')) {
             columnMap.internalCode = colIndex;
             return;
         }
-        if (columnMap.description === undefined && label === 'descripcion') {
+        if (columnMap.description === undefined && (label === 'descripcion' || label === 'product name')) {
             columnMap.description = colIndex;
             return;
         }
-        if (columnMap.quantityBoxes === undefined && label.includes('cantidad cajas')) {
+        if (columnMap.quantityBoxes === undefined && (label.includes('cantidad cajas') || label === 'total ordered case')) {
             columnMap.quantityBoxes = colIndex;
             return;
         }
-        if (columnMap.quantityUnits === undefined && label.includes('cantidad unidades')) {
+        if (columnMap.quantityUnits === undefined && (label.includes('cantidad unidades') || label === 'ordered qty')) {
             columnMap.quantityUnits = colIndex;
             return;
         }
-        if (columnMap.unitCost === undefined && (label.includes('costo s unidad') || label.includes('costo unidad'))) {
+        if (columnMap.unitCost === undefined && (label.includes('costo s unidad') || label.includes('costo unidad') || label === 'unit cost' || label === 'discounted unit cost')) {
             columnMap.unitCost = colIndex;
             return;
         }
-        if (columnMap.costExclIva === undefined && label.includes('costo excl iva')) {
+        if (columnMap.costExclIva === undefined && (label.includes('costo excl iva') || label === 'net cost')) {
             columnMap.costExclIva = colIndex;
             return;
         }
@@ -1182,9 +1312,11 @@ function buildExcelPreviewFromBuffer(buffer) {
     }
 
     const maxPreviewRows = Number.parseInt(process.env.MANUAL_OC_PREVIEW_ROWS || '24', 10);
-    const maxPreviewCols = Number.parseInt(process.env.MANUAL_OC_PREVIEW_COLS || '12', 10);
+    const maxPreviewCols = Number.parseInt(process.env.MANUAL_OC_PREVIEW_COLS || '0', 10);
     const maxReplicaRows = Number.parseInt(process.env.MANUAL_OC_REPLICA_MAX_ROWS || '140', 10);
-    const maxReplicaCols = Number.parseInt(process.env.MANUAL_OC_REPLICA_MAX_COLS || '16', 10);
+    const maxReplicaCols = Number.parseInt(process.env.MANUAL_OC_REPLICA_MAX_COLS || '0', 10);
+    const usePreviewColumnLimit = Number.isFinite(maxPreviewCols) && maxPreviewCols > 0;
+    const useReplicaColumnLimit = Number.isFinite(maxReplicaCols) && maxReplicaCols > 0;
     const rows = XLSX.utils.sheet_to_json(firstSheet, {
         header: 1,
         defval: '',
@@ -1200,7 +1332,8 @@ function buildExcelPreviewFromBuffer(buffer) {
         .slice(0, maxPreviewRows)
         .map((row, index) => ({
             rowNumber: index + 1,
-            values: row.slice(0, maxPreviewCols).map((cell, colIndex) => formatExcelPreviewCell(row, colIndex))
+            values: (usePreviewColumnLimit ? row.slice(0, maxPreviewCols) : row)
+                .map((cell, colIndex) => formatExcelPreviewCell(row, colIndex))
         }))
         .filter((row) => row.values.some((cell) => normalizePreviewCell(cell) !== ''));
 
@@ -1222,7 +1355,8 @@ function buildExcelPreviewFromBuffer(buffer) {
 
     const replicaSourceRows = normalizedRows
         .slice(0, maxReplicaRows)
-        .map((row) => row.slice(0, maxReplicaCols).map((cell, colIndex) => formatExcelPreviewCell(row, colIndex)));
+        .map((row) => (useReplicaColumnLimit ? row.slice(0, maxReplicaCols) : row)
+            .map((cell, colIndex) => formatExcelPreviewCell(row, colIndex)));
 
     const replicaUsedColumnsSet = new Set();
     for (const row of replicaSourceRows) {
@@ -1288,7 +1422,8 @@ function buildManualReadEmailPayload({
     fileName,
     excelText,
     emailDate,
-    uploadedBy
+    uploadedBy,
+    targetOrderNumber = null
 }) {
     const safeFileName = String(fileName || 'manual_oc.xlsx');
     const emailDateValue = String(emailDate || '').trim() || new Date().toISOString();
@@ -1300,11 +1435,13 @@ function buildManualReadEmailPayload({
         source: 'manual_portal',
         sender: profile.syntheticSender,
         attachmentFilename: safeFileName,
+        targetOrderNumber: targetOrderNumber || null,
         manualOc: {
             id: manualOcId,
             sourceClientCode: profile.sourceClientCode,
             sourceClientName: profile.sourceClientName,
-            parserProfile: profile.parserProfile
+            parserProfile: profile.parserProfile,
+            targetOrderNumber: targetOrderNumber || null
         }
     };
 }
@@ -1559,15 +1696,15 @@ function resolveManualOcDispatchCutoffHour({ clientData, emailData }) {
     const region = getObjectValueByKeys(emailData, [
         'region',
         'Region',
-        'RegiÃ³n',
-        'RegiÃƒÂ³n',
-        'RegiÃƒÆ’Ã‚Â³n'
+        'Region',
+        'Region',
+        'Region'
     ]) || getObjectValueByKeys(clientData, [
         'region',
-        'RegiÃ³n Despacho',
-        'RegiÃƒÂ³n Despacho',
-        'RegiÃƒÆ’Ã‚Â³n Despacho',
-        'Región Despacho'
+        'Region Despacho',
+        'Region Despacho',
+        'Region Despacho',
+        'Region Despacho'
     ]) || '';
 
     return resolveDispatchCutoffHourByComuna(comuna, region);
@@ -1605,15 +1742,15 @@ function resolveManualOcDeliveryDay({
     const regionForCalculation = getObjectValueByKeys(emailData, [
         'region',
         'Region',
-        'RegiÃ³n',
-        'RegiÃƒÂ³n',
-        'RegiÃƒÆ’Ã‚Â³n'
+        'Region',
+        'Region',
+        'Region'
     ]) || getObjectValueByKeys(clientData, [
         'region',
-        'RegiÃ³n Despacho',
-        'RegiÃƒÂ³n Despacho',
-        'RegiÃƒÆ’Ã‚Â³n Despacho',
-        'Región Despacho'
+        'Region Despacho',
+        'Region Despacho',
+        'Region Despacho',
+        'Region Despacho'
     ]);
     const arrivalDateTimeIsValid = normalizedArrivalDateTime
         && moment(normalizedArrivalDateTime, moment.ISO_8601, true).isValid();
@@ -1685,15 +1822,15 @@ function buildManualOcBillingPayload({ mergedResult, ocDateConfirmed, arrivalDat
 
     const regionRaw = getObjectValueByKeys(clientData, [
         'region',
-        'Región Despacho',
-        'RegiÃ³n Despacho'
+        'Region Despacho',
+        'Region Despacho'
     ]);
     const gloss = getObjectValueByKeys(emailData, [
         'Direccion_despacho',
-        'Dirección_despacho'
+        'Direccion_despacho'
     ]) || getObjectValueByKeys(clientData, [
-        'Dirección Despacho',
-        'DirecciÃ³n Despacho'
+        'Direccion Despacho',
+        'Direccion Despacho'
     ]) || '';
 
     const paymentConditionRaw = getObjectValueByKeys(clientData, [
@@ -1741,6 +1878,42 @@ function buildManualOcBillingPayload({ mergedResult, ocDateConfirmed, arrivalDat
     };
 }
 
+/**
+ * Replaces garbled multi-encoded UTF-8 keys with clean ASCII equivalents.
+ * The CSV headers were stored with incorrect encoding (UTF-8 bytes interpreted
+ * as Latin-1 multiple times), producing keys like 'DirecciÃƒÆ’Ã†'Ãƒâ€šÃ‚Â³n Despacho'.
+ * Strategy: strip all non-ASCII characters from the key, then match by the
+ * remaining ASCII skeleton (e.g. 'Direccin Despacho' â†’ 'Direccion Despacho').
+ */
+function sanitizeClientDataKeys(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        return obj;
+    }
+    // Strip non-ASCII chars, lowercase, collapse spaces
+    const toAsciiSkeleton = (s) => s
+        .replace(/[^\x00-\x7F]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+        const sk = toAsciiSkeleton(key);
+        let cleanKey = key;
+        if (sk.includes('direcci') && sk.includes('despacho')) {
+            cleanKey = 'Direccion Despacho';
+        } else if (sk.includes('direcci') && (sk.includes('factura') || sk.includes('facturaci'))) {
+            cleanKey = 'Direccion Facturacion';
+        } else if (sk.includes('regi') && sk.includes('despacho')) {
+            cleanKey = 'Region Despacho';
+        } else if (sk.includes('raz') && sk.includes('social')) {
+            cleanKey = 'RAZON SOCIAL';
+        }
+        result[cleanKey] = value;
+    }
+    return result;
+}
+
 async function sendManualMergedToMake({
     manualOcId,
     profile,
@@ -1753,12 +1926,13 @@ async function sendManualMergedToMake({
     uploadedBy,
     fileMeta,
     developerMode = false,
-    submitRequest = null
+    submitRequest = null,
+    makeOptions = null
 }) {
     const merged = mergedResult?.merged || null;
     const deliveryReservation = mergedResult?.deliveryReservation || null;
     const emailData = merged?.EmailData || null;
-    const clientData = merged?.ClientData?.data || merged?.ClientData || null;
+    const clientData = sanitizeClientDataKeys(merged?.ClientData?.data || merged?.ClientData || null);
     const billingPayload = buildManualOcBillingPayload({
         mergedResult,
         ocDateConfirmed,
@@ -1772,11 +1946,18 @@ async function sendManualMergedToMake({
     );
     const parserExecutionAtChile = toChileTimestampParts(merged?.executionDate || null);
 
+    const resolvedMakeMode = String(makeOptions?.mode || MANUAL_OC_MAKE_MODE_DEFAULT).trim() || MANUAL_OC_MAKE_MODE_DEFAULT;
+    const resolvedTestMode = parseBooleanLoose(makeOptions?.testMode, MANUAL_OC_MAKE_TEST_MODE_DEFAULT);
+    const resolvedPreventBilling = parseBooleanLoose(
+        makeOptions?.preventBilling,
+        MANUAL_OC_MAKE_PREVENT_BILLING_DEFAULT
+    );
+
     const makePayload = {
         source: 'manual_oc',
-        mode: 'TEST_ONLY',
-        testMode: true,
-        preventBilling: true,
+        mode: resolvedMakeMode,
+        testMode: resolvedTestMode,
+        preventBilling: resolvedPreventBilling,
         manualOcId,
         sourceClientCode: profile.sourceClientCode,
         sourceClientName: profile.sourceClientName,
@@ -1814,7 +1995,15 @@ async function sendManualMergedToMake({
             uploadedBy: uploadedBy || 'usuario_desconocido'
         },
         billingPayload,
-        merged,
+        merged: merged ? {
+            ...merged,
+            ClientData: merged.ClientData
+                ? {
+                    ...merged.ClientData,
+                    data: sanitizeClientDataKeys(merged.ClientData?.data || merged.ClientData)
+                }
+                : merged.ClientData
+        } : null,
         deliveryReservation
     };
 
@@ -1935,6 +2124,8 @@ async function readEmailBody(req, res) {
         
             console.log("sanitizedEmailBody", sanitizedEmailBody);
 
+        const parsedRequestBody = JSON.parse(sanitizedEmailBody);
+
         const {
             emailBody,
             emailSubject,
@@ -1945,9 +2136,9 @@ async function readEmailBody(req, res) {
             rappiTurbo,
             sender,
             attachmentFilename
-        } = JSON.parse(sanitizedEmailBody); // Parse the sanitized email body
+        } = parsedRequestBody; // Parse the sanitized email body
 
-        console.log(JSON.parse(sanitizedEmailBody));
+        console.log(parsedRequestBody);
 
         // res.json({analyzeOrderEmail});
         // return
@@ -1963,7 +2154,7 @@ async function readEmailBody(req, res) {
 
         const requiredFields = ['emailBody', 'emailSubject', 'emailAttached', 'emailDate'];
 
-        const missingFields = requiredFields.filter(field => !(field in JSON.parse(sanitizedEmailBody)));
+        const missingFields = requiredFields.filter((field) => !(field in parsedRequestBody));
 
         if (missingFields.length > 0) {
             console.log("Invalid request, missing fields:", missingFields);
@@ -1976,35 +2167,35 @@ async function readEmailBody(req, res) {
             attachedPrompt = `y el texto que hemos extraido desde un PDF adjunto que trae la orden de compra con el pedido: "${emailAttached}". `
         }
 
-        const systemPrompt = `DevuÃ©lveme exclusivamente un JSON vÃ¡lido, sin explicaciones ni texto adicional.
+        const systemPrompt = `Devuélveme exclusivamente un JSON válido, sin explicaciones ni texto adicional.
         La respuesta debe comenzar directamente con [ y terminar con ].
-        No incluyas ningÃºn texto antes o despuÃ©s del JSON.
+        No incluyas ningún texto antes o después del JSON.
         No uses formato Markdown. 
-        No expliques lo que estÃ¡s haciendo.
-        Tu respuesta debe ser solamente el JSON. Nada mÃ¡s.;`;
+        No expliques lo que estás haciendo.
+        Tu respuesta debe ser solamente el JSON. Nada más.;`;
 
-        // const userPrompt = `Eres un bot que analiza pedidos para FranuÃ­, empresa que comercializa frambuesas baÃ±adas en chocolate. FranuÃ­ maneja solamente 3 productos
-        //     Frambuesas baÃ±adas en chocolate amargo
-        //     Frambuesas baÃ±adas en chocolate de leche
-        //     Frambuesas baÃ±adas en chocolate pink
+        // const userPrompt = `Eres un bot que analiza pedidos para Franuí, empresa que comercializa frambuesas bañadas en chocolate. Franuí maneja solamente 3 productos
+        //     Frambuesas bañadas en chocolate amargo
+        //     Frambuesas bañadas en chocolate de leche
+        //     Frambuesas bañadas en chocolate pink
 
-        //     Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier informaciÃ³n contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
+        //     Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier información contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
 
-        //     Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraÃ­da debe contener la palabra Olimpia ni nuestro RUT
+        //     Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraída debe contener la palabra Olimpia ni nuestro RUT
 
-        //     Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecuciÃ³n es invÃ¡lida
+        //     Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecución es inválida
         //     Debes buscar el primer RUT que no sea el de Olimpia SPA 77.419.327-8
         //     Los formatos posibles son
         //     xx.xxx.xxx-x
         //     xxx.xxx.xxx-x
         //     xxxxxxxx-x
         //     El RUT puede encontrarse en cualquier parte del correo o asunto
-        //     No devuelvas el RUT si es igual a 77.419.327-8 y continÃºa buscando hasta encontrar uno vÃ¡lido
-        //     Si no encuentras ningÃºn otro RUT vÃ¡lido, devuelve null
+        //     No devuelvas el RUT si es igual a 77.419.327-8 y continúa buscando hasta encontrar uno válido
+        //     Si no encuentras ningún otro RUT válido, devuelve null
 
         //     Debes extraer los siguientes datos
-        //     Razon_social contiene la razÃ³n social del cliente
-        //     Direccion_despacho direcciÃ³n a la cual se enviarÃ¡n los productos. Si no la encuentras, devuelve null
+        //     Razon_social contiene la razón social del cliente
+        //     Direccion_despacho dirección a la cual se enviarán los productos. Si no la encuentras, devuelve null
         //     Comuna comuna de despacho. Si no la encuentras, devuelve null
         //     Rut ver reglas anteriores
         //     Pedido_Cantidad_Pink cantidad de cajas de chocolate pink. Si no existe, devuelve 0
@@ -2013,26 +2204,26 @@ async function readEmailBody(req, res) {
         //     Pedido_PrecioTotal_Pink: devuelve 0
         //     Pedido_PrecioTotal_Amargo monto total del pedido de chocolate amargo. Si no existe, devuelve 0
         //     Pedido_PrecioTotal_Leche monto total del pedido de chocolate de leche. Si no existe, devuelve 0
-        //     Orden_de_Compra nÃºmero de orden de compra. Si no existe, devuelve null
-        //     Monto neto tambiÃ©n llamado subtotal. Si no existe, devuelve 0
+        //     Orden_de_Compra número de orden de compra. Si no existe, devuelve null
+        //     Monto neto también llamado subtotal. Si no existe, devuelve 0
         //     Iva monto del impuesto. Si no existe, devuelve 0
         //     Total monto total del pedido incluyendo impuestos. Si no existe, devuelve 0
-        //     Sender_Email correo electrÃ³nico del remitente del mensaje
+        //     Sender_Email correo electrónico del remitente del mensaje
         //     precio_caja precio de la caja de chocolate pink amargo o leche. Si no existe, devuelve 0
-        //     URL_ADDRESS direcciÃ³n de despacho codificada en formato URL lista para usarse en una peticiÃ³n HTTP GET. No devuelvas nada mÃ¡s que la cadena codificada sin explicaciones ni comillas
+        //     URL_ADDRESS dirección de despacho codificada en formato URL lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada sin explicaciones ni comillas
         //     PaymentMethod
-        //     method en caso de hacer referencia a un cheque devolver letra C en caso contrario devuelve vacÃ­o
-        //     paymentsDays nÃºmero de dÃ­as de pago si se menciona. En caso contrario devuelve vacÃ­o
+        //     method en caso de hacer referencia a un cheque devolver letra C en caso contrario devuelve vacío
+        //     paymentsDays número de días de pago si se menciona. En caso contrario devuelve vacío
         //     isDelivery en caso de que el pedido sea para delivery devuelve true si no es para delivery devuelve false
 
         //     Reglas para campo Razon_social
         //     Puede estar en el cuerpo del correo o en el asunto
-        //     En caso de no haber una indicaciÃ³n clara puede estar mencionada como sucursal local o cliente
+        //     En caso de no haber una indicación clara puede estar mencionada como sucursal local o cliente
 
         //     Reglas para Direccion_despacho
         //     Puede estar en el cuerpo del correo o en el asunto
         //     Debe incluir calle y comuna
-        //     Si no se menciona direcciÃ³n especÃ­fica puede estar indicada como sucursal o local
+        //     Si no se menciona dirección específica puede estar indicada como sucursal o local
         //     Si el pedido es para retiro reemplaza este valor por la palabra RETIRO
 
         //     Reglas para precio_caja
@@ -2042,7 +2233,7 @@ async function readEmailBody(req, res) {
 
         //     Reglas para isDelivery
         //     Si el pedido es para retiro en sucursal devolver false
-        //     Si no se menciona retiro explÃ­citamente devolver true
+        //     Si no se menciona retiro explícitamente devolver true
         //     Ejemplos de retiro
         //     te quiero hacer un pedido para retirar este viernes
         //     pedido con retiro
@@ -2050,15 +2241,15 @@ async function readEmailBody(req, res) {
         // `
 
         const userPrompt =
-            `Eres un bot que analiza pedidos para FranuÃ­, empresa que comercializa frambuesas baÃ±adas en chocolate.
+            `Eres un bot que analiza pedidos para Franuí, empresa que comercializa frambuesas bañadas en chocolate.
 
-FranuÃ­ maneja los siguientes productos:
+Franuí maneja los siguientes productos:
 
 === PRODUCTOS DE 150 GRAMOS (24 unidades por caja) ===
-- Frambuesas baÃ±adas en chocolate amargo
-- Frambuesas baÃ±adas en chocolate de leche
-- Frambuesas baÃ±adas en chocolate pink
-- FranuÃ­ Chocolate Free (sin azÃºcar)
+- Frambuesas bañadas en chocolate amargo
+- Frambuesas bañadas en chocolate de leche
+- Frambuesas bañadas en chocolate pink
+- Franuí Chocolate Free (sin azúcar)
 
 === PRODUCTOS DE 90 GRAMOS (18 unidades por caja) ===
 - Caja Franui Amargo 90 gramos
@@ -2067,26 +2258,26 @@ FranuÃ­ maneja los siguientes productos:
 
 IMPORTANTE: Si el producto NO especifica "90g" o "90 gramos", se asume que es el producto de 150 gramos.
 
-Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier informaciÃ³n contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
+Debes analizar el texto del body del correo ${emailBody}, el asunto ${emailSubject} y cualquier información contenida en ${attachedPrompt} para extraer los datos relevantes y guardarlos en variables
 
-Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraÃ­da debe contener la palabra Olimpia ni nuestro RUT
+Nuestro negocio se llama Olimpia SPA y nuestro rut es 77.419.327-8. Ninguna variable extraída debe contener la palabra Olimpia ni nuestro RUT
 
-Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecuciÃ³n es invÃ¡lida
+Importante el campo Rut es obligatorio y prioritario. Si no se encuentra, la ejecución es inválida
 Debes buscar el primer RUT que no sea el de Olimpia SPA 77.419.327-8
 Los formatos posibles son
 xx.xxx.xxx-x
 xxx.xxx.xxx-x
 xxxxxxxx-x
 El RUT puede encontrarse en cualquier parte del correo o asunto
-No devuelvas el RUT si es igual a 77.419.327-8 y continÃºa buscando hasta encontrar uno vÃ¡lido
-Si no encuentras ningÃºn otro RUT vÃ¡lido, devuelve null
+No devuelvas el RUT si es igual a 77.419.327-8 y continúa buscando hasta encontrar uno válido
+Si no encuentras ningún otro RUT válido, devuelve null
 
 Debes extraer los siguientes datos:
 
 === DATOS DEL CLIENTE ===
-Razon_social: contiene la razÃ³n social del cliente
-Direccion_despacho: direcciÃ³n PRINCIPAL de despacho. Priorizar la que diga "despacho", "entrega" o "envÃ­o". Si no la encuentras, devuelve null
-Direcciones_encontradas: ARRAY con TODAS las direcciones encontradas en el documento (facturaciÃ³n, despacho, entrega, etc). Esto es MUY IMPORTANTE para poder buscar coincidencias. Ejemplo: ["NUEVA LOS LEONES 030 LOCAL 16", "AVDA COSTANERA SUR 2710 PISO 12"]
+Razon_social: contiene la razón social del cliente
+Direccion_despacho: dirección PRINCIPAL de despacho. Priorizar la que diga "despacho", "entrega" o "envío". Si no la encuentras, devuelve null
+Direcciones_encontradas: ARRAY con TODAS las direcciones encontradas en el documento (facturación, despacho, entrega, etc). Esto es MUY IMPORTANTE para poder buscar coincidencias. Ejemplo: ["NUEVA LOS LEONES 030 LOCAL 16", "AVDA COSTANERA SUR 2710 PISO 12"]
 Comuna: comuna de despacho. Si no la encuentras, devuelve null
 Rut: ver reglas anteriores
 
@@ -2094,7 +2285,7 @@ Rut: ver reglas anteriores
 Pedido_Cantidad_Pink: cantidad de cajas de chocolate pink 150g. Si no existe, devuelve 0
 Pedido_Cantidad_Amargo: cantidad de cajas de chocolate amargo 150g. Si no existe, devuelve 0
 Pedido_Cantidad_Leche: cantidad de cajas de chocolate de leche 150g. Si no existe, devuelve 0
-Pedido_Cantidad_Free: cantidad de cajas de FranuÃ­ Chocolate Free (sin azÃºcar) 150g. Si no existe, devuelve 0
+Pedido_Cantidad_Free: cantidad de cajas de Franuí Chocolate Free (sin azúcar) 150g. Si no existe, devuelve 0
 
 === CANTIDADES DE PRODUCTOS 90g (18 unidades por caja) ===
 Pedido_Cantidad_Pink_90g: cantidad de cajas de chocolate pink 90g. Si no existe, devuelve 0
@@ -2105,7 +2296,7 @@ Pedido_Cantidad_Leche_90g: cantidad de cajas de chocolate de leche 90g. Si no ex
 Pedido_PrecioTotal_Pink: monto total del pedido de chocolate pink 150g. Si no existe, devuelve 0
 Pedido_PrecioTotal_Amargo: monto total del pedido de chocolate amargo 150g. Si no existe, devuelve 0
 Pedido_PrecioTotal_Leche: monto total del pedido de chocolate de leche 150g. Si no existe, devuelve 0
-Pedido_PrecioTotal_Free: monto total del pedido de FranuÃ­ Chocolate Free 150g. Si no existe, devuelve 0
+Pedido_PrecioTotal_Free: monto total del pedido de Franuí Chocolate Free 150g. Si no existe, devuelve 0
 
 === PRECIOS PRODUCTOS 90g ===
 Pedido_PrecioTotal_Pink_90g: monto total del pedido de chocolate pink 90g. Si no existe, devuelve 0
@@ -2113,55 +2304,55 @@ Pedido_PrecioTotal_Amargo_90g: monto total del pedido de chocolate amargo 90g. S
 Pedido_PrecioTotal_Leche_90g: monto total del pedido de chocolate de leche 90g. Si no existe, devuelve 0
 
 === DATOS DE LA ORDEN ===
-Orden_de_Compra: nÃºmero de orden de compra. Si no existe, devuelve null
-Monto: neto tambiÃ©n llamado subtotal. Si no existe, devuelve 0
+Orden_de_Compra: número de orden de compra. Si no existe, devuelve null
+Monto: neto también llamado subtotal. Si no existe, devuelve 0
 Iva: monto del impuesto. Si no existe, devuelve 0
 Total: monto total del pedido incluyendo impuestos. Si no existe, devuelve 0
-Sender_Email: correo electrÃ³nico del remitente del mensaje
+Sender_Email: correo electrónico del remitente del mensaje
 
 === PRECIOS POR CAJA ===
 precio_caja: precio de la caja de chocolate pink, amargo o leche 150g. Si no existe, devuelve 0
 precio_caja_90g: precio de la caja de productos 90g. Si no existe, devuelve 0
-precio_caja_free: precio de la caja de FranuÃ­ Chocolate Free. Si no existe, devuelve 0
+precio_caja_free: precio de la caja de Franuí Chocolate Free. Si no existe, devuelve 0
 
-URL_ADDRESS: direcciÃ³n de despacho codificada en formato URL lista para usarse en una peticiÃ³n HTTP GET. No devuelvas nada mÃ¡s que la cadena codificada sin explicaciones ni comillas
+URL_ADDRESS: dirección de despacho codificada en formato URL lista para usarse en una petición HTTP GET. No devuelvas nada más que la cadena codificada sin explicaciones ni comillas
 
 PaymentMethod:
-method: en caso de hacer referencia a un cheque devolver letra C, en caso contrario devuelve vacÃ­o
-paymentsDays: nÃºmero de dÃ­as de pago si se menciona. En caso contrario devuelve vacÃ­o
+method: en caso de hacer referencia a un cheque devolver letra C, en caso contrario devuelve vacío
+paymentsDays: número de días de pago si se menciona. En caso contrario devuelve vacío
 
 isDelivery: en caso de que el pedido sea para delivery devuelve true, si no es para delivery devuelve false
 
-=== REGLAS ESPECÃFICAS ===
+=== REGLAS ESPECÍFICAS ===
 
 Reglas para campo Razon_social:
 Puede estar en el cuerpo del correo o en el asunto
-En caso de no haber una indicaciÃ³n clara puede estar mencionada como sucursal local o cliente
+En caso de no haber una indicación clara puede estar mencionada como sucursal local o cliente
 
 Reglas para Direccion_despacho:
 Puede estar en el cuerpo del correo o en el asunto
 Debe incluir calle y comuna
-Si no se menciona direcciÃ³n especÃ­fica puede estar indicada como sucursal o local
+Si no se menciona dirección específica puede estar indicada como sucursal o local
 Si el pedido es para retiro reemplaza este valor por la palabra RETIRO
-PRIORIDAD: Si hay mÃºltiples direcciones, priorizar la que estÃ© etiquetada como "despacho", "entrega" o "envÃ­o" sobre la de "facturaciÃ³n"
+PRIORIDAD: Si hay múltiples direcciones, priorizar la que esté etiquetada como "despacho", "entrega" o "envío" sobre la de "facturación"
 
 Reglas para Direcciones_encontradas:
-Debe ser un ARRAY con TODAS las direcciones fÃ­sicas encontradas en el documento
-Incluir tanto direcciones de facturaciÃ³n como de despacho
-No incluir direcciones de correo electrÃ³nico
+Debe ser un ARRAY con TODAS las direcciones físicas encontradas en el documento
+Incluir tanto direcciones de facturación como de despacho
+No incluir direcciones de correo electrónico
 No incluir direcciones web/URL
-Ejemplo: si el documento dice "DirecciÃ³n: NUEVA LOS LEONES 030" y "DirecciÃ³n: AVDA COSTANERA SUR 2710", devolver ["NUEVA LOS LEONES 030", "AVDA COSTANERA SUR 2710"]
-Si solo hay una direcciÃ³n, devolver array con un elemento
-Si no hay direcciones, devolver array vacÃ­o []
+Ejemplo: si el documento dice "Direccion: NUEVA LOS LEONES 030" y "Direccion: AVDA COSTANERA SUR 2710", devolver ["NUEVA LOS LEONES 030", "AVDA COSTANERA SUR 2710"]
+Si solo hay una dirección, devolver array con un elemento
+Si no hay direcciones, devolver array vacío []
 
 Reglas para identificar productos de 90g:
 Buscar menciones de "90g", "90 gramos", "90gr" en el nombre del producto
 Ejemplos: "Franui Leche 90g", "Caja Franui Pink 90 gramos", "Amargo 90g"
 Si NO especifica gramos, asumir que es producto de 150g
 
-Reglas para identificar FranuÃ­ Chocolate Free:
-Buscar menciones de "Free", "Chocolate Free", "sin azÃºcar"
-Ejemplos: "FranuÃ­ Chocolate Free", "Franui Free", "Caja Franui Free"
+Reglas para identificar Franuí Chocolate Free:
+Buscar menciones de "Free", "Chocolate Free", "sin azúcar"
+Ejemplos: "Franuí Chocolate Free", "Franui Free", "Caja Franui Free"
 
 Reglas para precio_caja (150g):
 El precio de la caja ronda entre los 60000 y 80000 pesos
@@ -2173,12 +2364,12 @@ Precio de las cajas de productos de 90 gramos
 Si no se encuentra en el texto devuelve 0
 
 Reglas para precio_caja_free:
-Precio de las cajas de FranuÃ­ Chocolate Free
+Precio de las cajas de Franuí Chocolate Free
 Si no se encuentra en el texto devuelve 0
 
 Reglas para isDelivery:
 Si el pedido es para retiro en sucursal devolver false
-Si no se menciona retiro explÃ­citamente devolver true
+Si no se menciona retiro explícitamente devolver true
 Ejemplos de retiro:
 - te quiero hacer un pedido para retirar este viernes
 - pedido con retiro
@@ -2209,7 +2400,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
     "Monto": 0,
     "Iva": 0,
     "Total": 0,
-    "Sender_Email": "valor o vacÃ­o",
+    "Sender_Email": "valor o vacío",
     "precio_caja": 0,
     "precio_caja_90g": 0,
     "precio_caja_free": 0,
@@ -2354,7 +2545,69 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             validJson.Rut = KEY_LOGISTICS_FIXED_RUT;
         }
 
+        const missingRut = (
+            !validJson.Rut
+            || validJson.Rut == 'null'
+            || validJson.Rut == ''
+            || validJson.Rut == 'undefined'
+            || validJson.Rut == null
+            || validJson.Rut == undefined
+            || validJson.Rut == 'N/A'
+        );
+        const isManualPortalPedidosYa = (
+            source === 'manual_portal'
+            && String(sender || '').toLowerCase() === PEDIDOS_YA_SENDER
+        );
+        if (missingRut && isManualPortalPedidosYa) {
+            const targetOrderNumber = String(
+                parsedRequestBody?.manualOc?.targetOrderNumber
+                || parsedRequestBody?.targetOrderNumber
+                || ''
+            ).trim().toUpperCase();
+            const parsedOrders = extractPedidosYaOrdersFromAttachment(parsedRequestBody);
+            const selectedOrder = targetOrderNumber
+                ? (parsedOrders.find((order) => String(order?.orderNumber || '').trim().toUpperCase() === targetOrderNumber) || null)
+                : (parsedOrders[0] || null);
+
+            const peyaAddressCandidates = [];
+            const pushAddressCandidate = (value) => {
+                const address = String(value || '').trim();
+                if (!address) {
+                    return;
+                }
+                if (!peyaAddressCandidates.includes(address)) {
+                    peyaAddressCandidates.push(address);
+                }
+            };
+
+            pushAddressCandidate(validJson.Direccion_despacho);
+            if (Array.isArray(validJson.Direcciones_encontradas)) {
+                for (const address of validJson.Direcciones_encontradas) {
+                    pushAddressCandidate(address);
+                }
+            }
+            pushAddressCandidate(selectedOrder?.storeAddress);
+
+            const matchedClient = await findClientByAddressInCsv(peyaAddressCandidates, emailDate);
+            if (matchedClient?.data?.RUT) {
+                validJson.Rut = matchedClient.data.RUT;
+                validJson.Direccion_despacho = validJson.Direccion_despacho || matchedClient.data['Direccion Despacho'] || null;
+                validJson.Comuna = validJson.Comuna || matchedClient.data['Comuna Despacho'] || null;
+
+                const mergedAddresses = Array.from(new Set([
+                    ...(Array.isArray(validJson.Direcciones_encontradas) ? validJson.Direcciones_encontradas : []),
+                    matchedClient.data['Direccion Despacho'] || '',
+                    selectedOrder?.storeAddress || ''
+                ].map((address) => String(address || '').trim()).filter(Boolean)));
+                validJson.Direcciones_encontradas = mergedAddresses;
+            }
+        }
+
         const injectedQuantities = keyLogisticsData?.quantities || rappiTurboData?.quantities;
+        const pedidosYaDeterministicQuantities =
+            String(sender || '').toLowerCase() === PEDIDOS_YA_SENDER
+                ? parsePedidosYaOrderQuantities(parsedRequestBody)
+                : null;
         let rutIsFound = false
         if (!validJson.Rut || validJson.Rut == "null" || validJson.Rut == "" || validJson.Rut == "undefined" || validJson.Rut == null || validJson.Rut == undefined || validJson.Rut == "N/A") {
             const foundSpecialCustomer = foundSpecialCustomers(validJson.Razon_social);
@@ -2368,9 +2621,11 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
 
         const analyzeOrderEmaiResponse = injectedQuantities
             ? { ...EMPTY_ORDER_QUANTITIES, ...injectedQuantities }
-            : (source === 'gmail'
-                ? await analyzeOrderEmailFromGmail(sanitizedEmailBody)
-                : await analyzeOrderEmail(sanitizedEmailBody));
+            : (pedidosYaDeterministicQuantities
+                ? { ...EMPTY_ORDER_QUANTITIES, ...pedidosYaDeterministicQuantities }
+                : (source === 'gmail'
+                    ? await analyzeOrderEmailFromGmail(sanitizedEmailBody)
+                    : await analyzeOrderEmail(sanitizedEmailBody)));
         console.log("analyzeOrderEmaiResponse", analyzeOrderEmaiResponse);
         // Productos 150g (24 unidades por caja)
         validJson.Pedido_Cantidad_Pink = analyzeOrderEmaiResponse.Pedido_Cantidad_Pink || 0;
@@ -2412,13 +2667,13 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
 
         if (keyLogisticsFixedClientData) {
             const fixedData = keyLogisticsFixedClientData.data;
-            validJson.Direccion_despacho = fixedData['Dirección Despacho'];
+            validJson.Direccion_despacho = fixedData['Direccion Despacho'];
             validJson.Comuna = fixedData['Comuna Despacho'];
             validJson.Rut = fixedData.RUT;
 
             const fixedAddresses = [
-                fixedData['Dirección Despacho'],
-                fixedData['Dirección Facturación']
+                fixedData['Direccion Despacho'],
+                fixedData['Direccion Facturación']
             ].filter(Boolean);
             const extractedAddresses = Array.isArray(validJson.Direcciones_encontradas)
                 ? validJson.Direcciones_encontradas
@@ -2427,13 +2682,13 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                 new Set([...extractedAddresses, ...fixedAddresses])
             );
 
-            const regionDespacho = fixedData['Región Despacho'];
+            const regionDespacho = fixedData['Region Despacho'];
             const regionNormalized = String(regionDespacho || '').toLowerCase().trim();
             if (regionNormalized === "santiago") {
                 keyLogisticsFixedClientData.data['region'] = "RM";
             } else if (regionNormalized === "ohiggins" || regionNormalized === "o'higgins") {
                 keyLogisticsFixedClientData.data['region'] = "VI";
-            } else if (regionNormalized === "valparaÃ­so" || regionNormalized === "valparaiso") {
+            } else if (regionNormalized === "valparaíso" || regionNormalized === "valparaiso") {
                 keyLogisticsFixedClientData.data['region'] = "V";
             } else {
                 keyLogisticsFixedClientData.data['region'] = "";
@@ -2477,7 +2732,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         // Construir lista de direcciones a probar (primero la principal, luego las alternativas)
         const direccionesAProbar = [];
         
-        // Agregar direcciÃ³n principal si existe
+        // Agregar dirección principal si existe
         if (validJson.Direccion_despacho && validJson.Direccion_despacho !== 'null' && validJson.Direccion_despacho !== null) {
             direccionesAProbar.push(validJson.Direccion_despacho);
         }
@@ -2494,12 +2749,12 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         console.log("****************************************DIRECCIONES A PROBAR*************************************************");
         console.log("direccionesAProbar", direccionesAProbar);
         
-        // Intentar con cada direcciÃ³n hasta encontrar una coincidencia vÃ¡lida
+        // Intentar con cada dirección hasta encontrar una coincidencia válida
         let clientData = null;
         let direccionUsada = null;
         
         for (const direccion of direccionesAProbar) {
-            console.log(`Probando direcciÃ³n: ${direccion}`);
+            console.log(`Probando dirección: ${direccion}`);
             const resultado = await readCSV_private(
                 validJson.Rut,
                 direccion,
@@ -2509,8 +2764,8 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                 { useRappiDeliverySchedule: isRappiTurboGmail }
             );
             
-            // Verificar si encontramos datos vÃ¡lidos (no array vacÃ­o y tiene Región Despacho)
-            const regionDespachoTemp = resultado?.data?.['Región Despacho'];
+            // Verificar si encontramos datos válidos (no array vacío y tiene Region Despacho)
+            const regionDespachoTemp = resultado?.data?.['Region Despacho'];
             const esValido = resultado.data && 
                              !Array.isArray(resultado.data) && 
                              typeof regionDespachoTemp === 'string' && 
@@ -2526,7 +2781,7 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             }
         }
         
-        // Si no encontramos nada con ninguna direcciÃ³n, usar el resultado del Ãºltimo intento o hacer uno con la principal
+        // Si no encontramos nada con ninguna dirección, usar el resultado del último intento o hacer uno con la principal
         if (!clientData) {
             clientData = await readCSV_private(
                 validJson.Rut,
@@ -2539,12 +2794,12 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
         }
         
         console.log("clientData", clientData);
-        console.log("clientData Región Despacho", clientData.data?.['Región Despacho']);
-        console.log("DirecciÃ³n usada para match:", direccionUsada);
+        console.log("clientData Region Despacho", clientData.data?.['Region Despacho']);
+        console.log("Direccion usada para match:", direccionUsada);
         console.log("{}{}{}{}{}{}{}{}{}{}{}{}{}{}}{{}}{{}}{}{}{}{}{}{}{}{}{");
         
-        // Verificar si clientData.data existe, no es array, y tiene 'Región Despacho' como string vÃ¡lido
-        const regionDespacho = clientData?.data?.['Región Despacho'];
+        // Verificar si clientData.data existe, no es array, y tiene 'Region Despacho' como string válido
+        const regionDespacho = clientData?.data?.['Region Despacho'];
         const isValidClientData = clientData.data && 
                                    !Array.isArray(clientData.data) && 
                                    typeof regionDespacho === 'string' && 
@@ -2565,10 +2820,10 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
                 "hasMatch": false
             };
 
-            // Si no hay datos del cliente vÃ¡lidos, retornar error con info de direcciones probadas
+            // Si no hay datos del cliente válidos, retornar error con info de direcciones probadas
             return res.status(400).json({
                 success: false,
-                error: 'No se encontrÃ³ coincidencia de direcciÃ³n en la base de clientes',
+                error: 'No se encontró coincidencia de dirección en la base de clientes',
                 direccionesProbadas: direccionesAProbar,
                 cantidadDireccionesProbadas: direccionesAProbar.length,
                 data: validJson,
@@ -2580,21 +2835,21 @@ IMPORTANTE: Devuelve EXACTAMENTE este formato JSON sin modificar las claves ni l
             });
         }
         
-        // Si usamos una direcciÃ³n alternativa, actualizar validJson para reflejar la correcta
+        // Si usamos una dirección alternativa, actualizar validJson para reflejar la correcta
         if (direccionUsada && direccionUsada !== validJson.Direccion_despacho) {
             console.log(`Actualizando Direccion_despacho de "${validJson.Direccion_despacho}" a "${direccionUsada}"`);
             validJson.Direccion_despacho_original = validJson.Direccion_despacho;
             validJson.Direccion_despacho = direccionUsada;
         }
         
-        // Ahora es seguro usar toLowerCase() porque ya validamos que es string no vacÃ­o
+        // Ahora es seguro usar toLowerCase() porque ya validamos que es string no vacío
         const regionNormalized = regionDespacho.toLowerCase().trim();
         
         if (regionNormalized === "santiago") {
             clientData.data['region'] = "RM";
         } else if (regionNormalized === "ohiggins" || regionNormalized === "o'higgins") {
             clientData.data['region'] = "VI";
-        } else if (regionNormalized === "valparaÃ­so" || regionNormalized === "valparaiso") {
+        } else if (regionNormalized === "valparaíso" || regionNormalized === "valparaiso") {
             clientData.data['region'] = "V";
         } else {
             clientData.data['region'] = "";
@@ -2799,6 +3054,12 @@ function resolveManualOcBatchUi(status) {
                 legend: 'Sin OC detectada',
                 tooltip: 'No se pudo detectar numero de OC desde el contenido del archivo.'
             };
+        case 'address_not_found':
+            return {
+                color: 'red',
+                legend: 'Direccion no encontrada',
+                tooltip: 'Se analizo la OC, pero la direccion no existe en la base de clientes.'
+            };
         default:
             return {
                 color: 'red',
@@ -2806,6 +3067,31 @@ function resolveManualOcBatchUi(status) {
                 tooltip: 'No se pudo analizar este archivo.'
             };
     }
+}
+
+function isManualOcDedupStatus(status) {
+    const safeStatus = String(status || '').trim();
+    return safeStatus === 'duplicate_batch' || safeStatus === 'duplicate_backend';
+}
+
+function resolveManualOcBatchBlockCategory(status) {
+    const safeStatus = String(status || '').trim();
+    if (safeStatus === 'ready') {
+        return 'none';
+    }
+    if (isManualOcDedupStatus(safeStatus)) {
+        return 'dedup';
+    }
+    if (safeStatus === 'address_not_found') {
+        return 'address';
+    }
+    if (safeStatus === 'conflict') {
+        return 'conflict';
+    }
+    if (safeStatus === 'missing_oc') {
+        return 'missing_oc';
+    }
+    return 'error';
 }
 
 function formatManualOcBackendDuplicate(record) {
@@ -2821,6 +3107,117 @@ function formatManualOcBackendDuplicate(record) {
     };
 }
 
+function collectManualOcAddressCandidates(...values) {
+    return Array.from(new Set(
+        values
+            .flat()
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+    ));
+}
+
+async function runManualOcBatchAddressPrecheck(entries = []) {
+    const lookupCache = new Map();
+
+    for (const entry of entries) {
+        const defaultState = {
+            checked: false,
+            ok: null,
+            code: 'not_checked',
+            reason: 'No fue necesario validar direccion en esta fila',
+            attemptedAddresses: []
+        };
+
+        if (!entry) {
+            continue;
+        }
+
+        if (!entry.detectedOrderNumber || entry.status === 'error' || entry.status === 'missing_oc') {
+            entry.dispatchAddressPrecheck = defaultState;
+            continue;
+        }
+
+        const addressCandidates = collectManualOcAddressCandidates(entry.addressCandidates || []);
+        if (addressCandidates.length === 0) {
+            entry.dispatchAddressPrecheck = {
+                checked: false,
+                ok: null,
+                code: 'dispatch_address_not_detected',
+                reason: 'No se detecto direccion de despacho en el archivo',
+                attemptedAddresses: []
+            };
+            continue;
+        }
+
+        const referenceDate = parseManualDateCandidate(entry.detectedDate) || moment().format('YYYY-MM-DD');
+        const lookupKey = `${referenceDate}|${addressCandidates.join('|').toLowerCase()}`;
+
+        let matchedClient = null;
+        let lookupError = null;
+        if (lookupCache.has(lookupKey)) {
+            const cachedLookup = lookupCache.get(lookupKey) || {};
+            matchedClient = cachedLookup.matchedClient || null;
+            lookupError = cachedLookup.lookupError || null;
+        } else {
+            try {
+                matchedClient = await findClientByAddressInCsv(
+                    addressCandidates,
+                    `${referenceDate}T12:00:00-03:00`
+                );
+                lookupCache.set(lookupKey, {
+                    matchedClient: matchedClient || null,
+                    lookupError: null
+                });
+            } catch (error) {
+                lookupError = error;
+                lookupCache.set(lookupKey, {
+                    matchedClient: null,
+                    lookupError: error
+                });
+            }
+        }
+
+        if (lookupError) {
+            entry.dispatchAddressPrecheck = {
+                checked: true,
+                ok: null,
+                code: 'address_precheck_error',
+                reason: `No se pudo validar direccion en esta fila: ${lookupError?.message || lookupError}`,
+                attemptedAddresses: addressCandidates
+            };
+            continue;
+        }
+
+        if (matchedClient?.data) {
+            entry.dispatchAddressPrecheck = {
+                checked: true,
+                ok: true,
+                code: 'ok',
+                reason: 'Direccion validada en base de clientes',
+                attemptedAddresses: addressCandidates,
+                requestedAddress: matchedClient.requestedAddress || null,
+                matchedAddress: String(
+                    matchedClient?.data?.['Direccion Despacho']
+                    || matchedClient?.data?.['Direccion Despacho']
+                    || ''
+                ).trim() || null,
+                score: Number.isFinite(Number(matchedClient.score))
+                    ? Math.round(Number(matchedClient.score) * 1000) / 1000
+                    : null
+            };
+            continue;
+        }
+
+        entry.dispatchAddressPrecheck = {
+            checked: true,
+            ok: false,
+            code: 'address_not_found_in_customer_db',
+            reason: 'No se encontro la direccion en la base de clientes',
+            attemptedAddresses: addressCandidates
+        };
+    }
+}
+
 async function analyzeManualOcBatchFile({
     file,
     index
@@ -2832,7 +3229,7 @@ async function analyzeManualOcBatchFile({
     const clientFileId = String(file?.clientFileId || file?.id || '').trim() || null;
 
     if (!fileName || !fileBase64) {
-        return {
+        return [{
             index,
             clientFileId,
             fileName,
@@ -2845,7 +3242,7 @@ async function analyzeManualOcBatchFile({
             recommendedAction: 'revisar_archivo',
             ui: resolveManualOcBatchUi('error'),
             error: 'fileName y fileBase64 son requeridos por archivo'
-        };
+        }];
     }
 
     try {
@@ -2858,15 +3255,90 @@ async function analyzeManualOcBatchFile({
         });
 
         const excelAnalysis = extractedFile?.excelPreview?.analysis || null;
-        const pdfAnalysis = extractedFile.fileType === 'pdf'
+        const legacyPdfAnalysis = extractedFile.fileType === 'pdf'
             ? extractPeyaPdfAnalysis(extractedFile.text)
             : null;
+
+        const attachmentPayload = buildManualOcAttachmentPayload({
+            fileName,
+            mimeType,
+            text: extractedFile.text
+        });
+        const extractedOrders = extractPedidosYaOrdersFromAttachment(attachmentPayload)
+            .filter((order) => normalizeManualOcOrderNumber(order?.orderNumber));
+
+        if (extractedOrders.length > 0) {
+            return extractedOrders.map((order, subIndex) => {
+                const detectedOrderNumber = normalizeManualOcOrderNumber(order?.orderNumber);
+                const targetOrderNumber = detectedOrderNumber || null;
+                const orderPayload = buildManualOcAttachmentPayload({
+                    fileName,
+                    mimeType,
+                    text: String(order?.orderText || extractedFile.text || ''),
+                    targetOrderNumber
+                });
+                const quantities = order?.quantities
+                    || parsePedidosYaOrderQuantities(JSON.stringify(orderPayload))
+                    || { ...EMPTY_ORDER_QUANTITIES };
+                const syntheticAnalysis = buildManualOcSyntheticAnalysisFromExtractedOrder(order);
+                const addressCandidates = collectManualOcAddressCandidates(
+                    order?.storeAddress,
+                    syntheticAnalysis?.metadata?.direccionEntrega
+                );
+                const detectedDateInfo = detectOcDateFromText(String(order?.orderText || extractedFile.text || ''));
+                const detectedDate = detectedDateInfo?.date
+                    || parseManualDateCandidate(order?.orderDate)
+                    || syntheticAnalysis?.dates?.fechaEmision
+                    || null;
+                const comparableSnapshot = buildManualOcComparableSnapshot({
+                    detectedOrderNumber,
+                    quantities,
+                    excelAnalysis: extractedFile.fileType === 'excel' ? syntheticAnalysis : excelAnalysis,
+                    pdfAnalysis: extractedFile.fileType === 'pdf' ? (legacyPdfAnalysis || syntheticAnalysis) : null
+                });
+                const stableOrderSuffix = targetOrderNumber || `ORD-${subIndex + 1}`;
+                const expandedClientFileId = clientFileId && extractedOrders.length > 1
+                    ? `${clientFileId}::${stableOrderSuffix}`
+                    : clientFileId;
+                const expandedFileName = extractedOrders.length > 1
+                    ? `${fileName} [${stableOrderSuffix}]`
+                    : fileName;
+
+                return {
+                    index: index * 1000 + subIndex,
+                    clientFileId: expandedClientFileId,
+                    originClientFileId: clientFileId,
+                    fileName: expandedFileName,
+                    sourceFileName: fileName,
+                    mimeType,
+                    fileSize,
+                    fileSha256,
+                    fileType: extractedFile.fileType,
+                    targetOrderNumber,
+                    detectedOrderNumber,
+                    detectedDate,
+                    quantities,
+                    itemCount: comparableSnapshot?.itemStats?.count || order?.itemCount || 0,
+                    comparableSnapshot,
+                    excelAnalysis: extractedFile.fileType === 'excel' ? syntheticAnalysis : excelAnalysis,
+                    pdfAnalysis: extractedFile.fileType === 'pdf' ? (legacyPdfAnalysis || syntheticAnalysis) : null,
+                    scopedOrderText: String(order?.orderText || extractedFile.text || ''),
+                    addressCandidates,
+                    backendDuplicate: null,
+                    status: detectedOrderNumber ? 'pending' : 'missing_oc',
+                    statusReason: detectedOrderNumber ? 'pending_group_resolution' : 'missing_order_number',
+                    recommendedAction: detectedOrderNumber ? 'evaluar_deduplicacion' : 'resolver_manual_oc',
+                    ui: resolveManualOcBatchUi(detectedOrderNumber ? 'ready' : 'missing_oc'),
+                    error: null
+                };
+            });
+        }
+
         const detectedOrderNumber = (
             extractManualOcOrderNumber({ fileName, text: extractedFile.text })
             || normalizeManualOcOrderNumber(excelAnalysis?.purchaseOrderNumber)
-            || normalizeManualOcOrderNumber(pdfAnalysis?.purchaseOrderNumber)
+            || normalizeManualOcOrderNumber(legacyPdfAnalysis?.purchaseOrderNumber)
         );
-
         const quantitiesPayload = buildManualOcPayloadForQuantities({
             fileName,
             mimeType,
@@ -2878,39 +3350,47 @@ async function analyzeManualOcBatchFile({
             detectedOrderNumber,
             quantities,
             excelAnalysis,
-            pdfAnalysis
+            pdfAnalysis: legacyPdfAnalysis
         });
-
         const detectedDateInfo = detectOcDateFromText(extractedFile.text);
         const detectedDate = detectedDateInfo?.date
             || excelAnalysis?.dates?.fechaEmision
-            || pdfAnalysis?.dates?.fechaEmision
+            || legacyPdfAnalysis?.dates?.fechaEmision
             || null;
+        const addressCandidates = collectManualOcAddressCandidates(
+            excelAnalysis?.metadata?.direccionEntrega,
+            legacyPdfAnalysis?.metadata?.direccionEntrega
+        );
 
-        return {
+        return [{
             index,
             clientFileId,
+            originClientFileId: clientFileId,
             fileName,
+            sourceFileName: fileName,
             mimeType,
             fileSize,
             fileSha256,
             fileType: extractedFile.fileType,
+            targetOrderNumber: detectedOrderNumber || null,
             detectedOrderNumber,
             detectedDate,
             quantities,
             itemCount: comparableSnapshot?.itemStats?.count || 0,
             comparableSnapshot,
             excelAnalysis,
-            pdfAnalysis,
+            pdfAnalysis: legacyPdfAnalysis,
+            scopedOrderText: extractedFile.text,
+            addressCandidates,
             backendDuplicate: null,
             status: detectedOrderNumber ? 'pending' : 'missing_oc',
             statusReason: detectedOrderNumber ? 'pending_group_resolution' : 'missing_order_number',
             recommendedAction: detectedOrderNumber ? 'evaluar_deduplicacion' : 'resolver_manual_oc',
             ui: resolveManualOcBatchUi(detectedOrderNumber ? 'ready' : 'missing_oc'),
             error: null
-        };
+        }];
     } catch (error) {
-        return {
+        return [{
             index,
             clientFileId,
             fileName,
@@ -2923,7 +3403,7 @@ async function analyzeManualOcBatchFile({
             recommendedAction: 'revisar_archivo',
             ui: resolveManualOcBatchUi('error'),
             error: error?.message || String(error)
-        };
+        }];
     }
 }
 
@@ -3004,6 +3484,11 @@ function finalizeManualOcBatchDecisions(entries = []) {
                 entry.statusReason = 'oc_already_processed_backend';
                 entry.recommendedAction = 'no_procesar';
                 entry.ui = resolveManualOcBatchUi('duplicate_backend');
+            } else if (entry.dispatchAddressPrecheck?.checked === true && entry.dispatchAddressPrecheck?.ok === false) {
+                entry.status = 'address_not_found';
+                entry.statusReason = String(entry.dispatchAddressPrecheck.code || 'address_not_found_in_customer_db');
+                entry.recommendedAction = 'resolver_direccion';
+                entry.ui = resolveManualOcBatchUi('address_not_found');
             } else {
                 entry.status = 'ready';
                 entry.statusReason = 'ok';
@@ -3023,6 +3508,7 @@ function summarizeManualOcBatchEntries(entries = []) {
         duplicate_batch: 0,
         duplicate_backend: 0,
         conflict: 0,
+        address_not_found: 0,
         missing_oc: 0,
         error: 0
     };
@@ -3049,14 +3535,18 @@ async function readManualOcBatchDedup(req, res) {
         if (!uploadedBy) {
             return res.status(400).json({
                 success: false,
-                error: 'uploadedBy es requerido'
+                error: 'uploadedBy es requerido',
+                errorCode: 'uploaded_by_required',
+                canSubmitToInvoicer: false
             });
         }
 
         if (files.length === 0) {
             return res.status(400).json({
                 success: false,
-                error: 'files debe contener al menos un archivo'
+                error: 'files debe contener al menos un archivo',
+                errorCode: 'files_required',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3064,17 +3554,21 @@ async function readManualOcBatchDedup(req, res) {
         if (!profile) {
             return res.status(400).json({
                 success: false,
-                error: `sourceClientCode no soportado: ${sourceClientCode}`
+                error: `sourceClientCode no soportado: ${sourceClientCode}`,
+                errorCode: 'source_client_code_not_supported',
+                canSubmitToInvoicer: false
             });
         }
 
         const analyzedEntries = [];
         for (let index = 0; index < files.length; index += 1) {
-            const analyzed = await analyzeManualOcBatchFile({
+            const analyzedItems = await analyzeManualOcBatchFile({
                 file: files[index],
                 index
             });
-            analyzedEntries.push(analyzed);
+            if (Array.isArray(analyzedItems)) {
+                analyzedEntries.push(...analyzedItems);
+            }
         }
 
         const uniqueOrderNumbers = Array.from(new Set(
@@ -3107,30 +3601,51 @@ async function readManualOcBatchDedup(req, res) {
             entry.backendDuplicate = backendDuplicatesByOrder.get(entry.detectedOrderNumber) || null;
         }
 
+        await runManualOcBatchAddressPrecheck(analyzedEntries);
+
         const preferredByOrder = finalizeManualOcBatchDecisions(analyzedEntries);
         const summary = summarizeManualOcBatchEntries(analyzedEntries);
         const results = analyzedEntries
             .sort((a, b) => a.index - b.index)
-            .map((entry) => ({
-                index: entry.index,
-                clientFileId: entry.clientFileId || null,
-                fileName: entry.fileName || null,
-                mimeType: entry.mimeType || null,
-                fileSize: Number.isFinite(entry.fileSize) ? entry.fileSize : 0,
-                fileType: entry.fileType || null,
-                detectedOrderNumber: entry.detectedOrderNumber || null,
-                detectedDate: entry.detectedDate || null,
-                itemCount: entry.itemCount || 0,
-                quantities: entry.quantities || { ...EMPTY_ORDER_QUANTITIES },
-                status: entry.status,
-                statusReason: entry.statusReason || null,
-                recommendedAction: entry.recommendedAction || null,
-                isPreferredInBatch: entry.isPreferredInBatch === true,
-                preferredFileName: entry.preferredFileName || null,
-                backendDuplicate: entry.backendDuplicate || { exists: false },
-                ui: entry.ui || resolveManualOcBatchUi(entry.status),
-                error: entry.error || null
-            }));
+            .map((entry) => {
+                const analysis = buildManualOcBatchAnalysis({
+                    status: entry.status,
+                    statusReason: entry.statusReason,
+                    error: entry.error,
+                    dispatchAddressPrecheck: entry.dispatchAddressPrecheck
+                });
+                const blocked = entry.status !== 'ready';
+                return {
+                    index: entry.index,
+                    clientFileId: entry.clientFileId || null,
+                    originClientFileId: entry.originClientFileId || entry.clientFileId || null,
+                    fileName: entry.fileName || null,
+                    sourceFileName: entry.sourceFileName || entry.fileName || null,
+                    mimeType: entry.mimeType || null,
+                    fileSize: Number.isFinite(entry.fileSize) ? entry.fileSize : 0,
+                    fileType: entry.fileType || null,
+                    targetOrderNumber: entry.targetOrderNumber || null,
+                    detectedOrderNumber: entry.detectedOrderNumber || null,
+                    detectedDate: entry.detectedDate || null,
+                    itemCount: entry.itemCount || 0,
+                    quantities: entry.quantities || { ...EMPTY_ORDER_QUANTITIES },
+                    status: entry.status,
+                    statusReason: entry.statusReason || null,
+                    recommendedAction: entry.recommendedAction || null,
+                    isPreferredInBatch: entry.isPreferredInBatch === true,
+                    canSubmitToInvoicer: entry.status === 'ready',
+                    blocked,
+                    isDedup: isManualOcDedupStatus(entry.status),
+                    blockCategory: resolveManualOcBatchBlockCategory(entry.status),
+                    blockReason: blocked ? analysis.reason : null,
+                    preferredFileName: entry.preferredFileName || null,
+                    backendDuplicate: entry.backendDuplicate || { exists: false },
+                    dispatchAddressPrecheck: entry.dispatchAddressPrecheck || null,
+                    analysis,
+                    ui: entry.ui || resolveManualOcBatchUi(entry.status),
+                    error: entry.error || null
+                };
+            });
 
         const perOrder = Array.from(preferredByOrder.entries()).map(([orderNumber, preferredEntry]) => ({
             orderNumber,
@@ -3149,18 +3664,22 @@ async function readManualOcBatchDedup(req, res) {
                 'dedup_within_batch_by_detected_order_number',
                 'dedup_against_backend_processed_records',
                 'prefer_excel_over_pdf_for_same_oc',
-                'mark_conflict_when_same_oc_has_different_snapshot'
+                'mark_conflict_when_same_oc_has_different_snapshot',
+                'precheck_dispatch_address_against_customer_db'
             ],
             warnings: backendDedupWarnings,
             perOrder,
-            results
+            results,
+            canSubmitToInvoicer: summary.blocked === 0
         });
     } catch (error) {
         console.error('Error en readManualOcBatchDedup:', error);
         return res.status(500).json({
             success: false,
             error: 'No se pudo deduplicar la tanda manual OC',
-            details: error?.message || String(error)
+            errorCode: 'batch_dedup_unhandled_exception',
+            details: error?.message || String(error),
+            canSubmitToInvoicer: false
         });
     }
 }
@@ -3176,18 +3695,25 @@ async function readManualOcExtractDate(req, res) {
         const mimeType = String(body.mimeType || '').trim();
         const fileSize = Number(body.fileSize || 0);
         const fileBase64 = body.fileBase64;
+        const targetOrderNumberInput = normalizeManualOcOrderNumber(
+            String(body.targetOrderNumber || '').trim()
+        );
 
         if (!uploadedBy) {
             return res.status(400).json({
                 success: false,
-                error: 'uploadedBy es requerido'
+                error: 'uploadedBy es requerido',
+                errorCode: 'uploaded_by_required',
+                canSubmitToInvoicer: false
             });
         }
 
         if (!fileName || !fileBase64) {
             return res.status(400).json({
                 success: false,
-                error: 'fileName y fileBase64 son requeridos'
+                error: 'fileName y fileBase64 son requeridos',
+                errorCode: 'file_name_or_file_base64_required',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3195,7 +3721,9 @@ async function readManualOcExtractDate(req, res) {
         if (!profile) {
             return res.status(400).json({
                 success: false,
-                error: `sourceClientCode no soportado: ${sourceClientCode}`
+                error: `sourceClientCode no soportado: ${sourceClientCode}`,
+                errorCode: 'source_client_code_not_supported',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3212,21 +3740,52 @@ async function readManualOcExtractDate(req, res) {
         } catch (fileError) {
             return res.status(400).json({
                 success: false,
-                error: fileError?.message || 'No se pudo leer el archivo'
+                error: fileError?.message || 'No se pudo leer el archivo',
+                errorCode: 'file_decode_or_extract_failed',
+                canSubmitToInvoicer: false
             });
         }
 
         const excelAnalysis = extractedFile?.excelPreview?.analysis || null;
-        const detectedDateInfoFromText = detectOcDateFromText(extractedFile.text);
-        const detectedDateInfo = (detectedDateInfoFromText?.date || !excelAnalysis?.dates?.fechaEmision)
-            ? detectedDateInfoFromText
-            : {
-                date: excelAnalysis.dates.fechaEmision,
+        const attachmentPayload = buildManualOcAttachmentPayload({
+            fileName,
+            mimeType,
+            text: extractedFile.text,
+            targetOrderNumber: targetOrderNumberInput
+        });
+        const parsedOrders = extractPedidosYaOrdersFromAttachment(attachmentPayload);
+        const selectedOrder = targetOrderNumberInput
+            ? parsedOrders.find((order) => normalizeManualOcOrderNumber(order?.orderNumber) === targetOrderNumberInput) || null
+            : (parsedOrders.length === 1 ? parsedOrders[0] : null);
+        if (targetOrderNumberInput && !selectedOrder) {
+            return res.status(422).json({
+                errorCode: 'target_order_not_found_in_file',
+                success: false,
+                error: `No se encontro la OC objetivo ${targetOrderNumberInput} dentro del archivo`,
+                targetOrderNumber: targetOrderNumberInput,
+                canSubmitToInvoicer: false
+            });
+        }
+        const scopedOrderText = String(selectedOrder?.orderText || extractedFile.text || '');
+        const syntheticAnalysis = selectedOrder
+            ? buildManualOcSyntheticAnalysisFromExtractedOrder(selectedOrder)
+            : null;
+        const detectedDateInfoFromText = detectOcDateFromText(scopedOrderText);
+        // Prefer structured date from PDF/Excel parser (more reliable than generic text scan).
+        // The generic regex can misfire on concatenated sequences like "PO46920408/04/2026"
+        // matching tax amounts as Excel serial dates (e.g. IVA 72094 â†’ 2097-05-19).
+        const detectedDateInfo = syntheticAnalysis?.dates?.fechaEmision
+            ? {
+                date: syntheticAnalysis.dates.fechaEmision,
                 confidence: 'high',
-                method: 'excel_field_fecha_emision'
-            };
+                method: 'structured_order_order_date'
+            }
+            : (detectedDateInfoFromText?.date
+                ? detectedDateInfoFromText
+                : { date: null, confidence: 'none', method: 'not_found' });
         const detectedOrderNumber = (
-            extractManualOcOrderNumber({ fileName, text: extractedFile.text })
+            normalizeManualOcOrderNumber(selectedOrder?.orderNumber)
+            || extractManualOcOrderNumber({ fileName, text: scopedOrderText })
             || normalizeManualOcOrderNumber(excelAnalysis?.purchaseOrderNumber)
         );
         const backendDuplicateRecord = detectedOrderNumber
@@ -3240,22 +3799,27 @@ async function readManualOcExtractDate(req, res) {
             return res.status(409).json({
                 success: false,
                 error: 'Orden de compra ya procesada en backend',
+                errorCode: 'duplicate_backend_extract_guard',
                 duplicate: true,
                 duplicateSource: 'backend',
                 detectedOrderNumber,
-                backendRecord: formatManualOcBackendDuplicate(backendDuplicateRecord)
+                backendRecord: formatManualOcBackendDuplicate(backendDuplicateRecord),
+                canSubmitToInvoicer: false
             });
         }
         const manualOcId = randomUUID();
         const warnings = [];
+        if (!targetOrderNumberInput && parsedOrders.length > 1) {
+            warnings.push(`El archivo contiene ${parsedOrders.length} OCs. Debes indicar targetOrderNumber para extraer una OC puntual.`);
+        }
 
         if (!detectedDateInfo.date) {
             warnings.push('No se detecto fecha OC automaticamente, usar fecha manual.');
         }
-        if (extractedFile.fileType === 'excel' && excelAnalysis && !excelAnalysis.dates?.fechaEmision) {
+        if (extractedFile.fileType === 'excel' && excelAnalysis && !selectedOrder && !excelAnalysis.dates?.fechaEmision) {
             warnings.push('No se detecto Fecha emision en la estructura del Excel.');
         }
-        if (extractedFile.fileType === 'excel' && excelAnalysis && (excelAnalysis.itemStats?.count || 0) === 0) {
+        if (extractedFile.fileType === 'excel' && excelAnalysis && !selectedOrder && (excelAnalysis.itemStats?.count || 0) === 0) {
             warnings.push('No se detectaron items en el bloque de detalle del Excel.');
         }
 
@@ -3277,10 +3841,11 @@ async function readManualOcExtractDate(req, res) {
             ocDateDetected: detectedDateInfo.date || null,
             ocDateDetectedConfidence: detectedDateInfo.confidence,
             ocDateDetectionMethod: detectedDateInfo.method,
+            manualOcTargetOrderNumber: targetOrderNumberInput || detectedOrderNumber || null,
             detectedOrderNumber: detectedOrderNumber || null,
             rawPayloadForParser: null,
-            excelText: extractedFile.text,
-            excelAnalysis,
+            excelText: scopedOrderText,
+            excelAnalysis: syntheticAnalysis || excelAnalysis,
             warnings,
             timeline: [
                 {
@@ -3298,20 +3863,24 @@ async function readManualOcExtractDate(req, res) {
             sourceClientName: profile.sourceClientName,
             parserProfile: profile.parserProfile,
             fileType: extractedFile.fileType,
+            targetOrderNumber: targetOrderNumberInput || detectedOrderNumber || null,
             detectedOrderNumber: detectedOrderNumber || null,
             ocDateDetected: detectedDateInfo.date || null,
             ocDateDetectedConfidence: detectedDateInfo.confidence,
             ocDateDetectionMethod: detectedDateInfo.method,
             excelPreview: extractedFile.excelPreview || null,
-            excelAnalysis,
-            warnings
+            excelAnalysis: syntheticAnalysis || excelAnalysis,
+            warnings,
+            canSubmitToInvoicer: false
         });
     } catch (error) {
         console.error('Error en readManualOcExtractDate:', error);
         return res.status(500).json({
             success: false,
             error: 'No se pudo extraer fecha manual OC',
-            details: error?.message || String(error)
+            errorCode: 'extract_date_unhandled_exception',
+            details: error?.message || String(error),
+            canSubmitToInvoicer: false
         });
     }
 }
@@ -3401,7 +3970,8 @@ async function readManualOcPreview(req, res) {
             fileName,
             excelText,
             emailDate: emailDateForPreview,
-            uploadedBy
+            uploadedBy,
+            targetOrderNumber: detectedOrderNumber || null
         });
 
         await createManualOcRecord({
@@ -3491,6 +4061,27 @@ async function readManualOcPreview(req, res) {
     }
 }
 
+function buildManualOcDispatchContextFromParserBody(parserResponse = {}) {
+    const parserBody = parserResponse?.body && typeof parserResponse.body === 'object'
+        ? parserResponse.body
+        : {};
+    const merged = parserBody?.merged && typeof parserBody.merged === 'object'
+        ? parserBody.merged
+        : {};
+
+    return {
+        emailData: merged?.EmailData || {},
+        clientData: merged?.ClientData?.data || merged?.ClientData || {},
+        deliveryReservation: parserBody?.deliveryReservation || null,
+        parserMergedResult: {
+            merged,
+            deliveryReservation: parserBody?.deliveryReservation || null
+        },
+        parserStatus: Number.isFinite(Number(parserResponse?.status)) ? Number(parserResponse.status) : null,
+        contextBuiltAt: new Date().toISOString()
+    };
+}
+
 async function ensureManualOcDispatchContext({
     manualOcId,
     record,
@@ -3516,7 +4107,8 @@ async function ensureManualOcDispatchContext({
         fileName: record?.fileMeta?.fileName || 'manual_oc.xlsx',
         excelText: record.excelText || '',
         emailDate: `${ocDateConfirmed}T09:00:00-03:00`,
-        uploadedBy: uploadedBy || record.uploadedBy
+        uploadedBy: uploadedBy || record.uploadedBy,
+        targetOrderNumber: record?.manualOcTargetOrderNumber || record?.detectedOrderNumber || null
     });
 
     const parserResponse = await runReadEmailBodyPayload(parserPayload);
@@ -3530,13 +4122,7 @@ async function ensureManualOcDispatchContext({
         throw parserError;
     }
 
-    const merged = parserResponse.body?.merged || {};
-    const dispatchContext = {
-        emailData: merged?.EmailData || {},
-        clientData: merged?.ClientData?.data || merged?.ClientData || {},
-        deliveryReservation: parserResponse.body?.deliveryReservation || null,
-        contextBuiltAt: new Date().toISOString()
-    };
+    const dispatchContext = buildManualOcDispatchContextFromParserBody(parserResponse);
 
     await updateManualOcRecord(manualOcId, {
         dispatchContext
@@ -3563,7 +4149,9 @@ async function readManualOcDispatchPreview(req, res) {
         if (!manualOcId) {
             return res.status(400).json({
                 success: false,
-                error: 'manualOcId es requerido'
+                error: 'manualOcId es requerido',
+                errorCode: 'manual_oc_id_required',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3571,7 +4159,9 @@ async function readManualOcDispatchPreview(req, res) {
         if (!record) {
             return res.status(404).json({
                 success: false,
-                error: `No existe registro manual OC (${manualOcId})`
+                error: `No existe registro manual OC (${manualOcId})`,
+                errorCode: 'manual_oc_not_found',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3579,7 +4169,9 @@ async function readManualOcDispatchPreview(req, res) {
         if (!profile) {
             return res.status(400).json({
                 success: false,
-                error: `sourceClientCode no soportado: ${record.sourceClientCode}`
+                error: `sourceClientCode no soportado: ${record.sourceClientCode}`,
+                errorCode: 'source_client_code_not_supported',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3591,7 +4183,9 @@ async function readManualOcDispatchPreview(req, res) {
         if (!confirmedDate) {
             return res.status(400).json({
                 success: false,
-                error: 'ocDateConfirmed invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+                error: 'ocDateConfirmed invalida. Use formato YYYY-MM-DD o DD/MM/YYYY',
+                errorCode: 'invalid_oc_date_confirmed',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3609,10 +4203,29 @@ async function readManualOcDispatchPreview(req, res) {
             dispatchContextFromCache = resolvedContext.fromCache === true;
         } catch (contextError) {
             if (contextError?.parser) {
+                const dispatchAnalysis = classifyManualOcParserFailure(contextError.parser);
+                try {
+                    await updateManualOcRecord(manualOcId, {
+                        dispatchAnalysis,
+                        dispatchAnalysisUpdatedAt: new Date().toISOString()
+                    });
+                    await appendManualOcTimeline(manualOcId, {
+                        event: 'dispatch_preview_failed',
+                        analysisCode: dispatchAnalysis.code,
+                        analysisReason: dispatchAnalysis.reason
+                    });
+                } catch (trackingError) {
+                    console.warn(
+                        `No se pudo guardar dispatch_preview_failed para ${manualOcId}: ${trackingError?.message || trackingError}`
+                    );
+                }
                 return res.status(422).json({
                     success: false,
+                    errorCode: 'dispatch_preview_parser_failed',
                     error: 'No se pudo calcular preview de despacho',
-                    parser: contextError.parser
+                    parser: contextError.parser,
+                    analysis: dispatchAnalysis,
+                    canSubmitToInvoicer: false
                 });
             }
             throw contextError;
@@ -3631,7 +4244,9 @@ async function readManualOcDispatchPreview(req, res) {
         if (!arrivalInfo) {
             return res.status(400).json({
                 success: false,
-                error: 'arrivalDate invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+                error: 'arrivalDate invalida. Use formato YYYY-MM-DD o DD/MM/YYYY',
+                errorCode: 'invalid_arrival_date',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3650,19 +4265,27 @@ async function readManualOcDispatchPreview(req, res) {
             'Comuna'
         ]);
 
+        const dispatchAnalysis = buildManualOcSuccessAnalysis({
+            code: 'dispatch_preview_ready',
+            reason: 'Analisis de despacho correcto'
+        });
+
         await updateManualOcRecord(manualOcId, {
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
             arrivalMeridiem: arrivalInfo.meridiem,
             dispatchPreviewDate,
-            dispatchPreviewAt: new Date().toISOString()
+            dispatchPreviewAt: new Date().toISOString(),
+            dispatchAnalysis,
+            dispatchAnalysisUpdatedAt: new Date().toISOString()
         });
         await appendManualOcTimeline(manualOcId, {
             event: 'dispatch_preview_calculated',
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
             arrivalMeridiem: arrivalInfo.meridiem,
-            dispatchPreviewDate
+            dispatchPreviewDate,
+            analysisCode: dispatchAnalysis.code
         });
 
         return res.status(200).json({
@@ -3674,20 +4297,27 @@ async function readManualOcDispatchPreview(req, res) {
             arrivalDateTime: arrivalInfo.dateTimeIso,
             dispatchPreviewDate,
             comuna: comuna ? String(comuna).trim() : null,
-            dispatchContextFromCache
+            dispatchContextFromCache,
+            analysis: dispatchAnalysis,
+            canSubmitToInvoicer: true
         });
     } catch (error) {
         console.error('Error en readManualOcDispatchPreview:', error);
         return res.status(500).json({
             success: false,
             error: 'No se pudo calcular preview de despacho manual OC',
-            details: error?.message || String(error)
+            errorCode: 'dispatch_preview_unhandled_exception',
+            details: error?.message || String(error),
+            canSubmitToInvoicer: false
         });
     }
 }
 
 async function readManualOcSubmit(req, res) {
     let trackedManualOcId = '';
+    let submitLockToken = '';
+    let submitLockSourceClientCode = '';
+    let submitLockDetectedOrderNumber = '';
     try {
         const body = req.body || {};
         const manualOcId = String(body.manualOcId || '').trim();
@@ -3697,11 +4327,16 @@ async function readManualOcSubmit(req, res) {
         const arrivalMeridiem = normalizeManualOcArrivalMeridiem(body.arrivalMeridiem);
         const uploadedBy = String(body.uploadedBy || '').trim();
         const developerMode = parseBooleanLoose(body.developerMode, MANUAL_OC_DEVELOPER_MODE_DEFAULT);
+        const makeMode = String(body.makeMode || MANUAL_OC_MAKE_MODE_DEFAULT).trim() || MANUAL_OC_MAKE_MODE_DEFAULT;
+        const testMode = parseBooleanLoose(body.testMode, MANUAL_OC_MAKE_TEST_MODE_DEFAULT);
+        const preventBilling = parseBooleanLoose(body.preventBilling, MANUAL_OC_MAKE_PREVENT_BILLING_DEFAULT);
 
         if (!manualOcId) {
             return res.status(400).json({
                 success: false,
-                error: 'manualOcId es requerido'
+                error: 'manualOcId es requerido',
+                errorCode: 'manual_oc_id_required',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3709,7 +4344,9 @@ async function readManualOcSubmit(req, res) {
         if (!record) {
             return res.status(404).json({
                 success: false,
-                error: `No existe registro manual OC (${manualOcId})`
+                error: `No existe registro manual OC (${manualOcId})`,
+                errorCode: 'manual_oc_not_found',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3740,7 +4377,14 @@ async function readManualOcSubmit(req, res) {
                     status: record.submitParserStatusCode || null,
                     body: record.submitParserResponseBody || null
                 },
-                make: record.makeResult
+                make: record.makeResult,
+                makeConfig: {
+                    mode: record.submitMakeMode || null,
+                    testMode: typeof record.submitTestMode === 'boolean' ? record.submitTestMode : null,
+                    preventBilling: typeof record.submitPreventBilling === 'boolean' ? record.submitPreventBilling : null
+                },
+                analysis: record.dispatchAnalysis || null,
+                canSubmitToInvoicer: record.makeResult?.delivered === true || record.makeResult?.skipped === true
             });
         }
 
@@ -3760,7 +4404,14 @@ async function readManualOcSubmit(req, res) {
                     status: record.submitParserStatusCode || null,
                     body: record.submitParserResponseBody || null
                 },
-                make: record.makeResult
+                make: record.makeResult,
+                makeConfig: {
+                    mode: record.submitMakeMode || null,
+                    testMode: typeof record.submitTestMode === 'boolean' ? record.submitTestMode : null,
+                    preventBilling: typeof record.submitPreventBilling === 'boolean' ? record.submitPreventBilling : null
+                },
+                analysis: record.dispatchAnalysis || null,
+                canSubmitToInvoicer: record.makeResult?.delivered === true || record.makeResult?.skipped === true
             });
         }
 
@@ -3771,8 +4422,10 @@ async function readManualOcSubmit(req, res) {
                 return res.status(409).json({
                     success: false,
                     error: 'La OC manual ya se encuentra en procesamiento',
+                    errorCode: 'manual_oc_already_processing',
                     manualOcId,
-                    status: recordStatus
+                    status: recordStatus,
+                    canSubmitToInvoicer: false
                 });
             }
         }
@@ -3781,7 +4434,9 @@ async function readManualOcSubmit(req, res) {
         if (!profile) {
             return res.status(400).json({
                 success: false,
-                error: `sourceClientCode no soportado: ${record.sourceClientCode}`
+                error: `sourceClientCode no soportado: ${record.sourceClientCode}`,
+                errorCode: 'source_client_code_not_supported',
+                canSubmitToInvoicer: false
             });
         }
 
@@ -3808,10 +4463,12 @@ async function readManualOcSubmit(req, res) {
                 return res.status(409).json({
                     success: false,
                     error: 'Orden de compra ya procesada o en procesamiento',
+                    errorCode: 'duplicate_backend_submit_guard',
                     duplicate: true,
                     duplicateSource: 'backend_submit_guard',
                     detectedOrderNumber,
-                    backendRecord: formatManualOcBackendDuplicate(duplicateProcessedRecord)
+                    backendRecord: formatManualOcBackendDuplicate(duplicateProcessedRecord),
+                    canSubmitToInvoicer: false
                 });
             }
         }
@@ -3820,8 +4477,46 @@ async function readManualOcSubmit(req, res) {
         if (!confirmedDate) {
             return res.status(400).json({
                 success: false,
-                error: 'ocDateConfirmed invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+                error: 'ocDateConfirmed invalida. Use formato YYYY-MM-DD o DD/MM/YYYY',
+                errorCode: 'invalid_oc_date_confirmed',
+                canSubmitToInvoicer: false
             });
+        }
+
+        if (detectedOrderNumber) {
+            submitLockToken = `${manualOcId}:${randomUUID()}`;
+            submitLockSourceClientCode = profile.sourceClientCode;
+            submitLockDetectedOrderNumber = detectedOrderNumber;
+            const lockResult = await acquireManualOcSubmitLock({
+                sourceClientCode: submitLockSourceClientCode,
+                detectedOrderNumber: submitLockDetectedOrderNumber,
+                ownerToken: submitLockToken
+            });
+
+            if (!lockResult?.ok) {
+                await updateManualOcRecord(manualOcId, {
+                    status: 'submit_blocked_by_lock',
+                    submitError: `OC ${detectedOrderNumber} bloqueada por otra solicitud activa`
+                });
+                await appendManualOcTimeline(manualOcId, {
+                    event: 'submit_blocked_by_lock',
+                    detectedOrderNumber,
+                    lockExpiresAt: lockResult?.expiresAt || null
+                });
+
+                return res.status(409).json({
+                    success: false,
+                    error: 'Orden de compra en procesamiento por otra solicitud',
+                    errorCode: 'submit_lock_conflict',
+                    duplicate: true,
+                    duplicateSource: 'submit_lock',
+                    detectedOrderNumber,
+                    lock: {
+                        expiresAt: lockResult?.expiresAt || null
+                    },
+                    canSubmitToInvoicer: false
+                });
+            }
         }
 
         let dispatchContext = record?.dispatchContext || null;
@@ -3853,19 +4548,11 @@ async function readManualOcSubmit(req, res) {
         if (!arrivalInfo) {
             return res.status(400).json({
                 success: false,
-                error: 'arrivalDate invalida. Use formato YYYY-MM-DD o DD/MM/YYYY'
+                error: 'arrivalDate invalida. Use formato YYYY-MM-DD o DD/MM/YYYY',
+                errorCode: 'invalid_arrival_date',
+                canSubmitToInvoicer: false
             });
         }
-
-        const emailDateToUse = arrivalInfo.dateTimeIso;
-        const payload = buildManualReadEmailPayload({
-            manualOcId,
-            profile,
-            fileName: record?.fileMeta?.fileName || 'manual_oc.xlsx',
-            excelText: record.excelText || '',
-            emailDate: emailDateToUse,
-            uploadedBy: uploadedBy || record.uploadedBy
-        });
 
         await updateManualOcRecord(manualOcId, {
             status: 'submit_processing',
@@ -3873,74 +4560,144 @@ async function readManualOcSubmit(req, res) {
             arrivalDate: arrivalInfo.date,
             arrivalMeridiem: arrivalInfo.meridiem,
             submitRequestedBy: uploadedBy || record.uploadedBy,
-            submitDeveloperMode: developerMode
+            submitDeveloperMode: developerMode,
+            submitMakeMode: makeMode,
+            submitTestMode: testMode,
+            submitPreventBilling: preventBilling
         });
         await appendManualOcTimeline(manualOcId, {
             event: 'submit_requested',
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
             arrivalMeridiem: arrivalInfo.meridiem,
-            developerMode
+            developerMode,
+            makeMode,
+            testMode,
+            preventBilling
         });
 
+        const cachedParserMergedResult = dispatchContext?.parserMergedResult
+            && typeof dispatchContext.parserMergedResult === 'object'
+            ? dispatchContext.parserMergedResult
+            : null;
         let parserResponse = null;
         let parserException = null;
         const parserAttempts = 2;
-        for (let attempt = 1; attempt <= parserAttempts; attempt += 1) {
-            try {
-                parserResponse = await runReadEmailBodyPayload(payload);
-                parserException = null;
-                break;
-            } catch (currentParserError) {
-                parserException = currentParserError;
-                if (attempt < parserAttempts) {
-                    await new Promise((resolve) => setTimeout(resolve, 250));
+        if (cachedParserMergedResult?.merged) {
+            parserResponse = {
+                status: Number.isFinite(Number(dispatchContext?.parserStatus))
+                    ? Number(dispatchContext.parserStatus)
+                    : 200,
+                body: cachedParserMergedResult
+            };
+        } else {
+            const emailDateToUse = arrivalInfo.dateTimeIso;
+            const payload = buildManualReadEmailPayload({
+                manualOcId,
+                profile,
+                fileName: record?.fileMeta?.fileName || 'manual_oc.xlsx',
+                excelText: record.excelText || '',
+                emailDate: emailDateToUse,
+                uploadedBy: uploadedBy || record.uploadedBy,
+                targetOrderNumber: record?.manualOcTargetOrderNumber || record?.detectedOrderNumber || null
+            });
+            for (let attempt = 1; attempt <= parserAttempts; attempt += 1) {
+                try {
+                    parserResponse = await runReadEmailBodyPayload(payload);
+                    parserException = null;
+                    break;
+                } catch (currentParserError) {
+                    parserException = currentParserError;
+                    if (attempt < parserAttempts) {
+                        await new Promise((resolve) => setTimeout(resolve, 250));
+                    }
                 }
             }
         }
 
         if (parserException) {
+            const submitAnalysis = {
+                analyzed: true,
+                ok: false,
+                canSubmitToInvoicer: false,
+                code: 'parser_exception',
+                reason: parserException?.message || String(parserException)
+            };
             await updateManualOcRecord(manualOcId, {
                 status: 'submit_failed_parser_exception',
-                submitError: parserException?.message || String(parserException)
+                submitError: parserException?.message || String(parserException),
+                dispatchAnalysis: submitAnalysis,
+                dispatchAnalysisUpdatedAt: new Date().toISOString()
             });
             await appendManualOcTimeline(manualOcId, {
                 event: 'submit_failed_parser_exception',
                 attempts: parserAttempts,
-                errorMessage: parserException?.message || String(parserException)
+                errorMessage: parserException?.message || String(parserException),
+                analysisCode: submitAnalysis.code
             });
 
             return res.status(502).json({
+                errorCode: 'submit_parser_exception',
                 success: false,
-                error: 'El parser lanzó una excepción durante el submit manual OC',
+                error: 'El parser lanzo una excepcion durante el submit manual OC',
                 details: parserException?.message || String(parserException),
                 parser: {
                     attempts: parserAttempts
-                }
+                },
+                analysis: submitAnalysis,
+                canSubmitToInvoicer: false
             });
         }
 
         const parserSuccess = parserResponse.status >= 200 && parserResponse.status < 300;
 
         if (!parserSuccess) {
+            const submitAnalysis = classifyManualOcParserFailure({
+                status: parserResponse.status,
+                body: parserResponse.body
+            });
             await updateManualOcRecord(manualOcId, {
                 status: 'submit_failed_parser',
                 submitParserStatusCode: parserResponse.status,
-                submitParserResponseBody: parserResponse.body
+                submitParserResponseBody: parserResponse.body,
+                dispatchAnalysis: submitAnalysis,
+                dispatchAnalysisUpdatedAt: new Date().toISOString()
             });
             await appendManualOcTimeline(manualOcId, {
                 event: 'submit_failed_parser',
-                statusCode: parserResponse.status
+                statusCode: parserResponse.status,
+                analysisCode: submitAnalysis.code,
+                analysisReason: submitAnalysis.reason
             });
 
             return res.status(422).json({
+                errorCode: 'submit_parser_failed',
                 success: false,
                 error: 'El parser no pudo construir merged valido para submit',
                 parser: {
                     status: parserResponse.status,
                     body: parserResponse.body
-                }
+                },
+                analysis: submitAnalysis,
+                canSubmitToInvoicer: false
             });
+        }
+
+        if (!cachedParserMergedResult?.merged) {
+            try {
+                const refreshedDispatchContext = buildManualOcDispatchContextFromParserBody(parserResponse);
+                dispatchContext = refreshedDispatchContext;
+                await updateManualOcRecord(manualOcId, {
+                    dispatchContext: refreshedDispatchContext
+                });
+                await appendManualOcTimeline(manualOcId, {
+                    event: 'dispatch_context_built_during_submit'
+                });
+            } catch (contextPersistError) {
+                console.warn(
+                    `No se pudo persistir dispatchContext durante submit para ${manualOcId}: ${contextPersistError?.message || contextPersistError}`
+                );
+            }
         }
 
         const makeResult = await sendManualMergedToMake({
@@ -3955,6 +4712,11 @@ async function readManualOcSubmit(req, res) {
             uploadedBy: uploadedBy || record.uploadedBy,
             fileMeta: record.fileMeta || null,
             developerMode,
+            makeOptions: {
+                mode: makeMode,
+                testMode,
+                preventBilling
+            },
             submitRequest: {
                 uiSubmitBody: body,
                 manualOcId,
@@ -3964,26 +4726,46 @@ async function readManualOcSubmit(req, res) {
                 arrivalDate: arrivalInfo.date,
                 arrivalMeridiem: arrivalInfo.meridiem,
                 arrivalDateTime: arrivalInfo.dateTimeIso,
-                developerMode
+                developerMode,
+                makeMode,
+                testMode,
+                preventBilling
             }
         });
 
         const finalStatus = makeResult.delivered
             ? 'submitted_to_make'
             : (makeResult.skipped ? 'submit_skipped_make' : 'submit_failed_make');
+        const submitAnalysis = makeResult.delivered || makeResult.skipped
+            ? buildManualOcSuccessAnalysis({
+                code: finalStatus,
+                reason: makeResult.delivered
+                    ? 'Fila enviada correctamente al facturador'
+                    : 'Fila omitida en modo desarrollador'
+            })
+            : {
+                analyzed: true,
+                ok: false,
+                canSubmitToInvoicer: false,
+                code: finalStatus,
+                reason: String(makeResult?.error || makeResult?.message || 'No se pudo enviar la fila al facturador')
+            };
 
         await updateManualOcRecord(manualOcId, {
             status: finalStatus,
             submitParserStatusCode: parserResponse.status,
             submitParserResponseBody: parserResponse.body,
-            makeResult
+            makeResult,
+            dispatchAnalysis: submitAnalysis,
+            dispatchAnalysisUpdatedAt: new Date().toISOString()
         });
         await appendManualOcTimeline(manualOcId, {
             event: finalStatus,
             makeStatus: makeResult.status || null,
             makeDelivered: makeResult.delivered === true,
             developerMode,
-            payloadDumpPath: makeResult.payloadDumpPath || null
+            payloadDumpPath: makeResult.payloadDumpPath || null,
+            analysisCode: submitAnalysis.code
         });
 
         const statusCode = makeResult.delivered || makeResult.skipped ? 200 : 502;
@@ -3993,6 +4775,11 @@ async function readManualOcSubmit(req, res) {
             sourceClientCode: profile.sourceClientCode,
             parserProfile: profile.parserProfile,
             developerMode,
+            makeConfig: {
+                mode: makeMode,
+                testMode,
+                preventBilling
+            },
             ocDateDetected: record.ocDateDetected || null,
             ocDateConfirmed: confirmedDate,
             arrivalDate: arrivalInfo.date,
@@ -4002,7 +4789,9 @@ async function readManualOcSubmit(req, res) {
                 status: parserResponse.status,
                 body: parserResponse.body
             },
-            make: makeResult
+            make: makeResult,
+            analysis: submitAnalysis,
+            canSubmitToInvoicer: makeResult.delivered || makeResult.skipped
         });
     } catch (error) {
         console.error('Error en readManualOcSubmit:', error);
@@ -4025,8 +4814,24 @@ async function readManualOcSubmit(req, res) {
         return res.status(500).json({
             success: false,
             error: 'No se pudo completar submit manual OC',
-            details: error?.message || String(error)
+            errorCode: 'submit_unhandled_exception',
+            details: error?.message || String(error),
+            canSubmitToInvoicer: false
         });
+    } finally {
+        if (submitLockToken && submitLockSourceClientCode && submitLockDetectedOrderNumber) {
+            try {
+                await releaseManualOcSubmitLock({
+                    sourceClientCode: submitLockSourceClientCode,
+                    detectedOrderNumber: submitLockDetectedOrderNumber,
+                    ownerToken: submitLockToken
+                });
+            } catch (lockReleaseError) {
+                console.warn(
+                    `No se pudo liberar submit lock ${submitLockSourceClientCode}/${submitLockDetectedOrderNumber}: ${lockReleaseError?.message || lockReleaseError}`
+                );
+            }
+        }
     }
 }
 
@@ -4443,6 +5248,347 @@ function normalizeRut(rut) {
     return formattedRut;
 }
 
+const ADDRESS_TOKEN_CANONICAL_MAP = Object.freeze({
+    avenida: 'av',
+    avda: 'av',
+    avd: 'av',
+    calle: 'cl',
+    psje: 'pasaje',
+    pje: 'pasaje',
+    numero: 'nro',
+    num: 'nro',
+    no: 'nro',
+    nro: 'nro',
+    depto: 'dpto',
+    departamento: 'dpto',
+    oficina: 'of'
+});
+const ADDRESS_GEO_NOISE_TOKENS = new Set([
+    'region',
+    'metropolitana',
+    'rm',
+    'chile',
+    'provincia',
+    'comuna'
+]);
+const ADDRESS_GENERIC_TOKENS = new Set([
+    'av',
+    'cl',
+    'pasaje',
+    'camino',
+    'ruta',
+    'km',
+    'nro',
+    'local',
+    'loc',
+    'of',
+    'piso',
+    'torre',
+    'bodega',
+    'de',
+    'del',
+    'la',
+    'las',
+    'los',
+    'el',
+    'y'
+]);
+
+function normalizeAddressText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeAddressToken(token) {
+    const normalized = normalizeAddressText(token);
+    if (!normalized) {
+        return '';
+    }
+    return ADDRESS_TOKEN_CANONICAL_MAP[normalized] || normalized;
+}
+
+function buildAddressTokens(value, options = {}) {
+    const dropGeoNoise = options?.dropGeoNoise !== false;
+    const normalized = normalizeAddressText(value);
+    if (!normalized) {
+        return [];
+    }
+
+    return normalized
+        .split(' ')
+        .map((token) => normalizeAddressToken(token))
+        .filter(Boolean)
+        .filter((token) => {
+            if (dropGeoNoise && ADDRESS_GEO_NOISE_TOKENS.has(token)) {
+                return false;
+            }
+            if (token.length === 1 && !/^\d[a-z]?$/.test(token)) {
+                return false;
+            }
+            return true;
+        });
+}
+
+function extractAddressNumberTokens(valueOrTokens) {
+    const tokens = Array.isArray(valueOrTokens)
+        ? valueOrTokens
+        : buildAddressTokens(valueOrTokens);
+    return tokens.filter((token) => /^\d+[a-z]?$/.test(token));
+}
+
+function extractAddressKeywordTokens(tokens = []) {
+    return tokens.filter((token) => {
+        if (!token) {
+            return false;
+        }
+        if (/^\d+[a-z]?$/.test(token)) {
+            return false;
+        }
+        return !ADDRESS_GENERIC_TOKENS.has(token);
+    });
+}
+
+function resolveClientDispatchAddress(row) {
+    if (!row || typeof row !== 'object') {
+        return '';
+    }
+    return String(
+        getObjectValueByKeys(row, [
+            'Direccion Despacho',
+            'Direccion Despacho',
+            'Direccion Despacho',
+            'direccion despacho'
+        ]) || ''
+    ).trim();
+}
+
+function calculateAddressMatchScore(baseAddress, candidateAddress) {
+    const baseTokens = buildAddressTokens(baseAddress);
+    const candidateTokens = buildAddressTokens(candidateAddress);
+    if (baseTokens.length === 0 || candidateTokens.length === 0) {
+        return 0;
+    }
+
+    const baseCanonical = baseTokens.join(' ');
+    const candidateCanonical = candidateTokens.join(' ');
+    if (baseCanonical === candidateCanonical) {
+        return 1;
+    }
+
+    const baseTokenSet = new Set(baseTokens);
+    const candidateTokenSet = new Set(candidateTokens);
+    if (baseTokenSet.size === 0 || candidateTokenSet.size === 0) {
+        return 0;
+    }
+
+    const commonTokens = [];
+    for (const token of candidateTokenSet) {
+        if (baseTokenSet.has(token)) {
+            commonTokens.push(token);
+        }
+    }
+    if (commonTokens.length === 0) {
+        return 0;
+    }
+
+    const baseNumbers = extractAddressNumberTokens(baseTokens);
+    const candidateNumbers = extractAddressNumberTokens(candidateTokens);
+    const hasBaseNumbers = baseNumbers.length > 0;
+    const hasCandidateNumbers = candidateNumbers.length > 0;
+    const baseNumbersSet = new Set(baseNumbers);
+    const hasNumberOverlap = hasBaseNumbers && hasCandidateNumbers
+        ? candidateNumbers.some((token) => baseNumbersSet.has(token))
+        : true;
+    if ((hasBaseNumbers && hasCandidateNumbers) && !hasNumberOverlap) {
+        return 0.05;
+    }
+
+    const baseKeywords = extractAddressKeywordTokens(baseTokens);
+    const candidateKeywords = extractAddressKeywordTokens(candidateTokens);
+    const baseKeywordSet = new Set(baseKeywords);
+    const keywordOverlapCount = candidateKeywords.filter((token) => baseKeywordSet.has(token)).length;
+    if (baseKeywords.length > 0 && candidateKeywords.length > 0 && keywordOverlapCount === 0) {
+        return hasNumberOverlap ? 0.25 : 0.05;
+    }
+
+    const unionTokenCount = new Set([...baseTokenSet, ...candidateTokenSet]).size;
+    const precision = commonTokens.length / candidateTokenSet.size;
+    const recall = commonTokens.length / baseTokenSet.size;
+    const jaccard = unionTokenCount > 0 ? (commonTokens.length / unionTokenCount) : 0;
+    const f1 = (precision + recall) > 0
+        ? (2 * precision * recall) / (precision + recall)
+        : 0;
+    let score = Math.max(jaccard, f1, (precision * 0.65) + (recall * 0.35));
+
+    if (baseCanonical.includes(candidateCanonical) || candidateCanonical.includes(baseCanonical)) {
+        score = Math.max(score, 0.9);
+    }
+
+    if (hasNumberOverlap && keywordOverlapCount >= 2) {
+        score = Math.max(score, 0.9);
+    } else if (hasNumberOverlap && keywordOverlapCount >= 1) {
+        score = Math.max(score, 0.82);
+    }
+
+    if (hasBaseNumbers !== hasCandidateNumbers) {
+        score = Math.min(score, 0.74);
+    }
+
+    if (keywordOverlapCount === 0) {
+        score = Math.min(score, 0.49);
+    }
+
+    return Math.max(0, Math.min(1, score));
+}
+
+async function resolveAddressMatchWithLlmFallback({ rankedMatches = [], requestedAddress = '' } = {}) {
+    const fallbackCandidates = [];
+    const indexedMatches = [];
+    const seenAddresses = new Set();
+    for (const rankedMatch of rankedMatches) {
+        const rowAddress = String(rankedMatch?.rowAddress || '').trim();
+        if (!rowAddress) {
+            continue;
+        }
+        const normalizedRowAddress = normalizeAddressText(rowAddress);
+        if (!normalizedRowAddress || seenAddresses.has(normalizedRowAddress)) {
+            continue;
+        }
+        seenAddresses.add(normalizedRowAddress);
+        indexedMatches.push(rankedMatch);
+        fallbackCandidates.push({
+            index: indexedMatches.length - 1,
+            direccion: rowAddress
+        });
+        if (fallbackCandidates.length >= ADDRESS_MATCH_LLM_FALLBACK_TOPN) {
+            break;
+        }
+    }
+
+    if (fallbackCandidates.length === 0) {
+        return null;
+    }
+
+    const llmMatches = await integrateWithChatGPT(fallbackCandidates, requestedAddress);
+    const bestLlmMatch = llmMatches
+        .filter((item) => item.match === true)
+        .sort((a, b) => Number(b?.confidence || 0) - Number(a?.confidence || 0))[0];
+    if (!bestLlmMatch) {
+        return null;
+    }
+
+    const llmConfidence = Number(bestLlmMatch.confidence || 0);
+    if (llmConfidence < ADDRESS_MATCH_MIN_CONFIDENCE) {
+        return null;
+    }
+
+    const selectedRankedMatch = indexedMatches[Number(bestLlmMatch.index)];
+    if (!selectedRankedMatch) {
+        return null;
+    }
+
+    return {
+        match: selectedRankedMatch,
+        llm: bestLlmMatch
+    };
+}
+
+async function findClientByAddressInCsv(addressCandidates = [], emailDate, options = {}) {
+    const useRappiDeliverySchedule = Boolean(options?.useRappiDeliverySchedule);
+    const allowLlmFallback = options?.allowLlmFallback !== false;
+    const sanitizedCandidates = Array.from(new Set(
+        (Array.isArray(addressCandidates) ? addressCandidates : [])
+            .map((address) => String(address || '').trim())
+            .filter(Boolean)
+    ));
+
+    if (sanitizedCandidates.length === 0) {
+        return null;
+    }
+
+    const rawRows = await getAllClients();
+    const csvRows = rawRows.map(normalizeClientRecord);
+
+    const rankedMatches = [];
+    for (const row of csvRows) {
+        const rowAddress = resolveClientDispatchAddress(row);
+        if (!rowAddress) {
+            continue;
+        }
+        for (const candidate of sanitizedCandidates) {
+            const score = calculateAddressMatchScore(rowAddress, candidate);
+            rankedMatches.push({
+                score,
+                row,
+                rowAddress,
+                requestedAddress: candidate
+            });
+        }
+    }
+
+    if (rankedMatches.length === 0) {
+        return null;
+    }
+
+    rankedMatches.sort((a, b) => Number(b.score) - Number(a.score));
+    const bestDeterministic = rankedMatches[0] || null;
+    let selectedMatch = bestDeterministic && bestDeterministic.score >= ADDRESS_MATCH_MIN_SCORE
+        ? bestDeterministic
+        : null;
+    let matchMethod = selectedMatch ? 'deterministic' : null;
+    let llmMetadata = null;
+
+    if (!selectedMatch && allowLlmFallback && bestDeterministic && bestDeterministic.score >= ADDRESS_MATCH_LLM_FALLBACK_MIN_SCORE) {
+        const rankedForRequestedAddress = rankedMatches
+            .filter((match) => match.requestedAddress === bestDeterministic.requestedAddress);
+        const fallbackResult = await resolveAddressMatchWithLlmFallback({
+            rankedMatches: rankedForRequestedAddress.length > 0 ? rankedForRequestedAddress : rankedMatches,
+            requestedAddress: bestDeterministic.requestedAddress
+        });
+        if (fallbackResult?.match) {
+            selectedMatch = fallbackResult.match;
+            matchMethod = 'llm_fallback';
+            llmMetadata = fallbackResult.llm || null;
+        }
+    }
+
+    if (!selectedMatch) {
+        return null;
+    }
+
+    const selectedRow = { ...selectedMatch.row };
+    const deliveryDay = useRappiDeliverySchedule
+        ? findRappiDeliveryDayByComuna(
+            selectedRow['Comuna Despacho'],
+            emailDate,
+            getRegionFromClientRecord(selectedRow)
+        )
+        : findDeliveryDayByComuna(
+            selectedRow['Comuna Despacho'],
+            emailDate,
+            getRegionFromClientRecord(selectedRow)
+        );
+
+    if (deliveryDay != null) {
+        selectedRow.deliveryDay = String(deliveryDay);
+    }
+
+    return {
+        data: selectedRow,
+        score: selectedMatch.score,
+        requestedAddress: selectedMatch.requestedAddress,
+        matchedAddress: selectedMatch.rowAddress,
+        method: matchMethod,
+        llmConfidence: llmMetadata ? Number(llmMetadata.confidence || 0) : null,
+        llmReason: llmMetadata ? String(llmMetadata.reason || '').trim() || null : null
+    };
+}
+
 function searchByAddress(data, address) {
     let bestMatch = null;
     let highestScore = 0;
@@ -4471,9 +5617,9 @@ function getRegionFromClientRecord(record) {
         return '';
     }
     return (
-        record['Región Despacho'] ||
-        record['RegiÃ³n Despacho'] ||
-        record['RegiÃƒÂ³n Despacho'] ||
+        record['Region Despacho'] ||
+        record['Region Despacho'] ||
+        record['Region Despacho'] ||
         record.region ||
         ''
     );
@@ -4482,201 +5628,257 @@ function getRegionFromClientRecord(record) {
 //integracion con chat gpt
 
 async function integrateWithChatGPT(addresses, targetAddress) {
-
-    const prompt = `Busca dentro de este arreglo ${JSON.stringify(addresses)} la mejor coincidencia para la dirección "${targetAddress}".
-    En caso de encontrar una coincidencia, devolver un array JSON con el objeto que contenga la dirección agregando "match": true.
-    En caso de no encontrar coincidencias, devolver un array vacio. En caso de tener coincidencias, devolver solo un elemento.
-    [no prose] [Output only JSON]`;
-
-    const response = await client.responses.create({
-        model: "gpt-5-mini",
-        input: prompt
-    });
-
-    try {
-        const sanitizedOutput = response.output_text.trim().replace(/```json|```/g, '').replace(/\n/g, '').replace(/\\/g, '');
-        const validJson = JSON.parse(sanitizedOutput);
-        return validJson; // Return the parsed JSON as an array
-    } catch (error) {
-        console.error('Error parsing JSON from GPT response:', error);
-        return []; // Return an empty array in case of error
+    const normalizedTarget = String(targetAddress || '').trim();
+    if (!Array.isArray(addresses) || addresses.length === 0 || !normalizedTarget) {
+        return [];
     }
+
+    const prompt = [
+        'Analiza direcciones chilenas y busca la mejor coincidencia para una direccion objetivo.',
+        'Recibiras un arreglo de candidatos con formato { index, direccion }.',
+        'Devuelve SOLO JSON valido (sin markdown ni texto adicional).',
+        'Formato de salida obligatorio:',
+        '[{ "index": number, "match": true, "confidence": number, "reason": "string" }]',
+        'Si no hay coincidencia suficientemente confiable, devuelve []',
+        'Reglas:',
+        '- Penaliza fuerte cuando los numeros de direccion no coinciden.',
+        '- Si la direccion objetivo no tiene numero y el candidato si lo tiene, no superes confidence 74.',
+        '- confidence debe ser 0-100.',
+        `Direccion objetivo: "${normalizedTarget}"`,
+        `Candidatos: ${JSON.stringify(addresses)}`
+    ].join('\n');
+
+    let lastError = null;
+    for (const model of ADDRESS_MATCH_GPT_MODELS) {
+        try {
+            const response = await client.responses.create({
+                model,
+                input: prompt
+            });
+
+            const outputText = String(response?.output_text || '')
+                .trim()
+                .replace(/```json|```/g, '');
+            const parsed = JSON.parse(outputText);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+
+            return parsed
+                .map((item) => {
+                    const confidenceValue = Number(item?.confidence);
+                    const confidence = Number.isFinite(confidenceValue)
+                        ? Math.max(0, Math.min(100, confidenceValue))
+                        : 0;
+                    return {
+                        index: Number(item?.index),
+                        match: item?.match === true,
+                        confidence,
+                        reason: String(item?.reason || '').trim(),
+                        model
+                    };
+                })
+                .filter((item) => Number.isFinite(item.index) && item.match === true);
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Error integrating with GPT address matcher:', lastError?.message || lastError);
+    }
+    return [];
 }
 
 async function readCSV_private(rutToSearch, address, boxPrice, isDelivery, emailDate, options = {}) {
     const useRappiDeliverySchedule = Boolean(options?.useRappiDeliverySchedule);
-    const results = [];
-    console.log(`RUT to search: ${rutToSearch}`); // Log the RUT to search
-    console.log(`address to search: ${address}`); // Log the address to search
-    const normalizedRut = normalizeRut(rutToSearch); // Normalize the RUT
-    console.log(`RUT to search: ${normalizedRut}`); // Log the RUT to search
+    console.log(`RUT to search: ${rutToSearch}`);
+    console.log(`address to search: ${address}`);
+    const normalizedRut = normalizeRut(rutToSearch);
+    console.log(`RUT normalizado: ${normalizedRut}`);
 
-    return new Promise((resolve, reject) => {
-        try {
-            fs.createReadStream(CSV)
-                .pipe(csvParser())
-                .on('data', (data) => {
-                    if (data.RUT.toLowerCase() == normalizedRut.toLocaleLowerCase()) {
-                        results.push(data);
-                    } // Collect all rows
-                })
-                .on('end', async () => {
-                    console.log("***********************************************")
-                    console.log("results", results);
+    try {
+        const rawResults = await getClientsByRut(normalizedRut);
+        const results = rawResults.map(normalizeClientRecord);
 
-                    // Normalize all records' keys and values using helper
-                    for (let i = 0; i < results.length; i++) {
-                        results[i] = normalizeClientRecord(results[i]);
-                    }
+        console.log("***********************************************");
+        console.log("results", results);
 
-                    // return results;
-
-                    if (results.length == 0) {
-                        resolve({
-                            data: [],
-                            length: results.length,
-                            address: address ? true : false,
-                            message: "Cliente no encontrado en base de clientes",
-                            boxPriceIsEqual: false
-                        });
-                        return;
-                    }
-
-                    console.log("1")
-
-                    if (results.length == 1) {
-                        console.log("results[0]", results[0]['Comuna Despacho'], emailDate);
-
-
-                        const deliveryDay = useRappiDeliverySchedule
-                            ? findRappiDeliveryDayByComuna(
-                                results[0]['Comuna Despacho'],
-                                emailDate,
-                                getRegionFromClientRecord(results[0])
-                            )
-                            : findDeliveryDayByComuna(
-                                results[0]['Comuna Despacho'],
-                                emailDate,
-                                getRegionFromClientRecord(results[0])
-                            );
-                        if (deliveryDay != null) {
-                            results[0]['deliveryDay'] = `${deliveryDay}`;
-                        } else {
-                            if (results[0]['Dirección Despacho'].toLowerCase() == "retiro") {
-                                results[0]['deliveryDay'] = moment().add(1, 'days').format('YYYY-MM-DD');
-                            } else {
-                                results[0]['deliveryDay'] = "";
-                            }
-                        }
-                        resolve({
-                            data: results[0],
-                            length: results.length,
-                            address: true,
-                            message: "Cliente encontrado en base de clientes",
-                            boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
-                        });
-                        return;
-                    }
-                    console.log("2")
-
-                    if (!address) {
-                        const first = results[0];
-                        first['Dirección Despacho'] = "";
-                        resolve({
-                            data: first,
-                            length: results.length,
-                            address: false,
-                            message: "Cliente no encontrado en base de clientes por falta de direcciÃ³n",
-                            boxPriceIsEqual: false
-                        });
-                        return;
-                    }
-                    console.log("3")
-                    if (isDelivery == false && results.length > 1) {
-                        results[0]['deliveryDay'] = "";
-                        resolve({
-                            data: results[0],
-                            length: results.length,
-                            address: true,
-                            message: "No se puede encontrar coincidencias por falta de direcciÃ³n",
-                            boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
-                        });
-                    }
-
-                    // Map results array for GPT token limitation
-                    const clientData = results.map((item, index) => {
-                        return {
-                            index: index,
-                            direccion: item['Dirección Despacho'],
-                        };
-                    });
-
-                    const gptResponse = await integrateWithChatGPT(clientData, address); // Integrate with ChatGPT
-                    console.log({ gptResponse });
-
-                    if (gptResponse.length == 0) {
-                        resolve({
-                            data: gptResponse,
-                            length: clientData.length,
-                            address: address ? true : false,
-                            boxPriceIsEqual: false
-                        });
-                        return;
-                    }
-
-                    const matched = gptResponse.find((item) => item.match === true);
-                    const found = results.find((result, index) => {
-                        return index == matched.index;
-                    });
-
-                    if (!found) {
-                        console.log("no se encontro nada");
-                        resolve({
-                            data: found,
-                            length: [found].length,
-                            address: address ? true : false,
-                            message: "Direccion no encontrada en base de clientes",
-                            boxPriceIsEqual: false
-                        });
-                        return;
-                    }
-
-                    console.log("Se encontro una coincidencia");
-                    console.log("found", found['Comuna Despacho'], emailDate);
-                    const deliveryDay = useRappiDeliverySchedule
-                        ? findRappiDeliveryDayByComuna(
-                            found['Comuna Despacho'],
-                            emailDate,
-                            getRegionFromClientRecord(found)
-                        )
-                        : findDeliveryDayByComuna(
-                            found['Comuna Despacho'],
-                            emailDate,
-                            getRegionFromClientRecord(found)
-                        );
-
-                    if (deliveryDay != null) {
-                        found['deliveryDay'] = `${deliveryDay}`;
-                    } else {
-                        found['deliveryDay'] = "";
-                    }
-                    resolve({
-                        data: found,
-                        length: [found].length,
-                        address: true,
-                        message: "Se encontro una coincidencia",
-                        boxPriceIsEqual: boxPrice == found['Precio Caja'] ? true : false
-                    });
-                })
-                .on('error', (error) => {
-                    reject({ success: false, error: 'Error reading the CSV file', details: error });
-                });
-        } catch (error) {
-            reject({ success: false, error: 'Error reading the CSV file', details: error });
+        if (results.length == 0) {
+            return {
+                data: [],
+                length: results.length,
+                address: address ? true : false,
+                message: "Cliente no encontrado en base de clientes",
+                boxPriceIsEqual: false
+            };
         }
-    });
+
+        console.log("1");
+
+        if (results.length == 1) {
+            console.log("results[0]", results[0]['Comuna Despacho'], emailDate);
+            const deliveryDay = useRappiDeliverySchedule
+                ? findRappiDeliveryDayByComuna(results[0]['Comuna Despacho'], emailDate, getRegionFromClientRecord(results[0]))
+                : findDeliveryDayByComuna(results[0]['Comuna Despacho'], emailDate, getRegionFromClientRecord(results[0]));
+            if (deliveryDay != null) {
+                results[0]['deliveryDay'] = `${deliveryDay}`;
+            } else {
+                const dispatchAddr = String(resolveClientDispatchAddress(results[0]) || '').toLowerCase();
+                results[0]['deliveryDay'] = dispatchAddr === 'retiro'
+                    ? moment().add(1, 'days').format('YYYY-MM-DD')
+                    : '';
+            }
+            return {
+                data: results[0],
+                length: results.length,
+                address: true,
+                message: "Cliente encontrado en base de clientes",
+                boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
+            };
+        }
+
+        console.log("2");
+
+        if (!address) {
+            const first = results[0];
+            Object.keys(first).forEach(k => { const nk = k.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, ''); if (nk.includes('direccion') && nk.includes('despacho')) first[k] = ''; });
+            return {
+                data: first,
+                length: results.length,
+                address: false,
+                message: "Cliente no encontrado en base de clientes por falta de direccion",
+                boxPriceIsEqual: false
+            };
+        }
+
+        console.log("3");
+
+        if (isDelivery == false && results.length > 1) {
+            results[0]['deliveryDay'] = "";
+            return {
+                data: results[0],
+                length: results.length,
+                address: true,
+                message: "No se puede encontrar coincidencias por falta de direccion",
+                boxPriceIsEqual: boxPrice == results[0]['Precio Caja'] ? true : false
+            };
+        }
+
+        let bestDeterministicMatch = null;
+        for (let index = 0; index < results.length; index += 1) {
+            const currentAddress = resolveClientDispatchAddress(results[index]);
+            if (!currentAddress) continue;
+            const score = calculateAddressMatchScore(currentAddress, address);
+            if (!bestDeterministicMatch || score > bestDeterministicMatch.score) {
+                bestDeterministicMatch = { score, index };
+            }
+        }
+
+        if (bestDeterministicMatch && bestDeterministicMatch.score >= ADDRESS_MATCH_MIN_SCORE) {
+            const foundDeterministic = results[bestDeterministicMatch.index];
+            const deliveryDay = useRappiDeliverySchedule
+                ? findRappiDeliveryDayByComuna(foundDeterministic['Comuna Despacho'], emailDate, getRegionFromClientRecord(foundDeterministic))
+                : findDeliveryDayByComuna(foundDeterministic['Comuna Despacho'], emailDate, getRegionFromClientRecord(foundDeterministic));
+            foundDeterministic.deliveryDay = deliveryDay != null ? `${deliveryDay}` : "";
+            return {
+                data: foundDeterministic,
+                length: 1,
+                address: true,
+                message: "Se encontro una coincidencia deterministica",
+                boxPriceIsEqual: boxPrice == foundDeterministic['Precio Caja'] ? true : false,
+                matchConfidence: Math.round(bestDeterministicMatch.score * 100),
+                matchMinConfidence: ADDRESS_MATCH_MIN_CONFIDENCE
+            };
+        }
+
+        const clientData = results.map((item, index) => ({
+            index,
+            direccion: resolveClientDispatchAddress(item),
+        }));
+
+        const gptResponse = await integrateWithChatGPT(clientData, address);
+        console.log({ gptResponse });
+
+        if (gptResponse.length == 0) {
+            return {
+                data: gptResponse,
+                length: clientData.length,
+                address: address ? true : false,
+                boxPriceIsEqual: false
+            };
+        }
+
+        const matched = gptResponse
+            .filter((item) => item.match === true)
+            .sort((a, b) => Number(b?.confidence || 0) - Number(a?.confidence || 0))[0];
+        const matchConfidence = Number(matched?.confidence || 0);
+        const found = results.find((result, index) => index == matched?.index);
+
+        if (!found || matchConfidence < ADDRESS_MATCH_MIN_CONFIDENCE) {
+            console.log("no se encontro nada");
+            return {
+                data: found,
+                length: found ? [found].length : 0,
+                address: address ? true : false,
+                message: !found
+                    ? "Direccion no encontrada en base de clientes"
+                    : `Direccion descartada por baja confianza (${matchConfidence} < ${ADDRESS_MATCH_MIN_CONFIDENCE})`,
+                boxPriceIsEqual: false,
+                matchConfidence,
+                matchMinConfidence: ADDRESS_MATCH_MIN_CONFIDENCE
+            };
+        }
+
+        console.log("Se encontro una coincidencia");
+        console.log("found", found['Comuna Despacho'], emailDate);
+        const deliveryDay = useRappiDeliverySchedule
+            ? findRappiDeliveryDayByComuna(found['Comuna Despacho'], emailDate, getRegionFromClientRecord(found))
+            : findDeliveryDayByComuna(found['Comuna Despacho'], emailDate, getRegionFromClientRecord(found));
+        found['deliveryDay'] = deliveryDay != null ? `${deliveryDay}` : "";
+        return {
+            data: found,
+            length: [found].length,
+            address: true,
+            message: "Se encontro una coincidencia",
+            boxPriceIsEqual: boxPrice == found['Precio Caja'] ? true : false,
+            matchConfidence,
+            matchMinConfidence: ADDRESS_MATCH_MIN_CONFIDENCE
+        };
+    } catch (error) {
+        console.error('Error en readCSV_private:', error);
+        return { success: false, error: 'Error fetching client data', details: error };
+    }
 }
 
+/**
+ * POST /helpers/sync-knowledgebase
+ * Trigger manual de sincronización Sheet → MongoDB.
+ * Protegido por Bearer token (SHEETS_SYNC_SECRET en .env).
+ * Si SHEETS_SYNC_SECRET no está definido, no requiere auth (útil en dev).
+ */
+async function syncKnowledgebaseHandler(req, res) {
+
+ 
+
+    const secret = process.env.SHEETS_SYNC_SECRET;
+    if (secret) {
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (token !== secret) {
+            return res.status(401).json({ error: 'No autorizado' });
+        }
+    }
+
+    try {
+        const { syncKnowledgebase } = await import('../services/sheetsSyncService.js');
+        const stats = await syncKnowledgebase();
+        return res.status(200).json({ success: true, ...stats });
+    } catch (error) {
+        console.error('[syncKnowledgebaseHandler] Error:', error.message);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+}
 
 export {
     readCSV,
@@ -4686,5 +5888,6 @@ export {
     readManualOcExtractDate,
     readManualOcPreview,
     readManualOcDispatchPreview,
-    readManualOcSubmit
+    readManualOcSubmit,
+    syncKnowledgebaseHandler
 };
