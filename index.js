@@ -214,18 +214,21 @@ const PORT = process.env.PORT || 5000;
 app.listen(5000, () => {
   console.log(`Server is running on port ${PORT}`);
 
-  // Sync periódico Sheet → MongoDB (opt-in: solo si SHEETS_SYNC_INTERVAL_HOURS > 0)
-  const syncIntervalHours = Number(process.env.SHEETS_SYNC_INTERVAL_HOURS || 0);
-  if (syncIntervalHours > 0) {
-    const intervalMs = syncIntervalHours * 60 * 60 * 1000;
-    console.log(`[sheetsSync] Sync automático configurado cada ${syncIntervalHours}h`);
-    setInterval(async () => {
-      try {
-        const stats = await syncKnowledgebase();
-        console.log('[sheetsSync] Sync periódico completado:', stats);
-      } catch (err) {
-        console.error('[sheetsSync] Error en sync periódico:', err.message);
-      }
-    }, intervalMs);
-  }
+  // Sync periódico Sheet → MongoDB — DESACTIVADO INDEFINIDAMENTE (2026-04-30)
+  // Para reactivar: descomentar el bloque y revisar que SHEETS_SYNC_INTERVAL_HOURS sea válido.
+  // El sync manual sigue disponible vía POST /helpers/sync-knowledgebase.
+  // const syncIntervalHours = Number(process.env.SHEETS_SYNC_INTERVAL_HOURS || 0);
+  // if (syncIntervalHours > 0) {
+  //   const intervalMs = syncIntervalHours * 60 * 60 * 1000;
+  //   console.log(`[sheetsSync] Sync automático configurado cada ${syncIntervalHours}h`);
+  //   setInterval(async () => {
+  //     try {
+  //       const stats = await syncKnowledgebase();
+  //       console.log('[sheetsSync] Sync periódico completado:', stats);
+  //     } catch (err) {
+  //       console.error('[sheetsSync] Error en sync periódico:', err.message);
+  //     }
+  //   }, intervalMs);
+  // }
+  console.log('[sheetsSync] Cron automático DESACTIVADO indefinidamente. Sync manual: POST /helpers/sync-knowledgebase');
 });
