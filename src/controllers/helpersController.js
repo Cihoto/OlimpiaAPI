@@ -5880,6 +5880,26 @@ async function syncKnowledgebaseHandler(req, res) {
     }
 }
 
+async function preflightSyncKnowledgebaseHandler(req, res) {
+    const secret = process.env.SHEETS_SYNC_SECRET;
+    if (secret) {
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (token !== secret) {
+            return res.status(401).json({ error: 'No autorizado' });
+        }
+    }
+
+    try {
+        const { preflightSyncKnowledgebase } = await import('../services/sheetsSyncService.js');
+        const report = await preflightSyncKnowledgebase();
+        return res.status(report.allPassed ? 200 : 400).json({ success: report.allPassed, ...report });
+    } catch (error) {
+        console.error('[preflightSyncKnowledgebaseHandler] Error:', error.message);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+}
+
 export {
     readCSV,
     readEmailBody,
@@ -5889,5 +5909,6 @@ export {
     readManualOcPreview,
     readManualOcDispatchPreview,
     readManualOcSubmit,
-    syncKnowledgebaseHandler
+    syncKnowledgebaseHandler,
+    preflightSyncKnowledgebaseHandler
 };

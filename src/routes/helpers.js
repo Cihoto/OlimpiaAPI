@@ -8,7 +8,8 @@ import {
     readManualOcPreview,
     readManualOcDispatchPreview,
     readManualOcSubmit,
-    syncKnowledgebaseHandler
+    syncKnowledgebaseHandler,
+    preflightSyncKnowledgebaseHandler
 } from '../controllers/helpersController.js';
 
 const router = Router();
@@ -23,5 +24,6 @@ router.post('/manual-oc/preview', readManualOcPreview);
 router.post('/manual-oc/dispatch-preview', readManualOcDispatchPreview);
 router.post('/manual-oc/submit', readManualOcSubmit);
 router.post('/sync-knowledgebase', syncKnowledgebaseHandler);
+router.post('/preflight-sync', preflightSyncKnowledgebaseHandler);
 
 export default router;

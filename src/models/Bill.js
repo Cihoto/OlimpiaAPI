@@ -422,24 +422,54 @@ class Bill {
      * @property {string} [phone] - The phone number of the client.
      */
     #getClientByFileId = async (apiKey, fileId) => {
-        try {
-            const clientURL = `${process.env.SALE_API_URL}GetClientsByFileID?fileId=${fileId}&status=1&itemsPerPage=10&pageNumber=1`;
-            const client = await fetch(clientURL, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
+        // Build the 3 RUT format candidates in priority order:
+        // 1. Full format with dots and hyphen:  77.634.430-3
+        // 2. No dots, with hyphen:              77634430-3
+        // 3. No dots, no hyphen:                776344303
+        const digits = String(fileId).replace(/\./g, '').replace(/-/g, '');
+        const withHyphen = digits.slice(0, -1) + '-' + digits.slice(-1);
+        const withDotsAndHyphen = withHyphen.replace(/^(\d+)(\d{3})(\d{3})-/, '$1.$2.$3-');
+
+        const candidates = [
+            withDotsAndHyphen,  // 77.634.430-3
+            withHyphen,         // 77634430-3
+            digits,             // 776344303
+        ].filter((v, i, arr) => arr.indexOf(v) === i); // deduplica si el input ya era uno de los formatos
+
+        const tryFetch = async (rutCandidate) => {
+            try {
+                const clientURL = `${process.env.SALE_API_URL}GetClientsByFileID?fileId=${encodeURIComponent(rutCandidate)}&status=1&itemsPerPage=10&pageNumber=1`;
+                const client = await fetch(clientURL, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    }
+                });
+                const clientData = await client.json();
+                console.log(`📦 Client Data URL (fileId=${rutCandidate}):`, clientURL);
+                console.log(`📦 Client Data (fileId=${rutCandidate}):`, { clientData });
+
+                if (!clientData.success || clientData.totalItems === 0) {
+                    return null; // no encontrado con este formato — probar siguiente
                 }
-            });
-            const clientData = await client.json();
-            console.log("📦 Client Data URL:", clientURL);
-            console.log("📦 Client Data:", { clientData });
+                return clientData;
+            } catch {
+                return null;
+            }
+        };
 
+        try {
+            let clientData = null;
+            for (const candidate of candidates) {
+                clientData = await tryFetch(candidate);
+                if (clientData) break;
+            }
 
-            if (!clientData.success || clientData.totalItems === 0) {
+            if (!clientData) {
                 return {
                     success: false,
-                    message: clientData.message || "Client not found"
+                    message: `Client not found (tried formats: ${candidates.join(', ')})`
                 };
             }
 
@@ -447,8 +477,9 @@ class Bill {
                 return {
                     success: false,
                     message: "Client is inactive"
-                }
+                };
             }
+
             console.log(clientData.clientList);
             return {
                 city: clientData.clientList[0].city,

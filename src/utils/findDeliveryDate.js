@@ -448,12 +448,12 @@ function findDeliveryDayByComuna(comunaToSearch, emailDate, region = '') {
 
         // Determine effective preparation day:
         // - After cutoff: cannot start preparing until tomorrow.
-        // - Advance past weekends only; holidays shift only the delivery date
-        //   (the candidate filter), not the preparation day.
+        // - Advance past weekends AND holidays: the warehouse cannot prepare
+        //   on non-working days, so both shift the preparation day.
         const prepStart = isAfterCutoff
             ? emailMoment.clone().startOf('day').add(1, 'day')
             : emailMoment.clone().startOf('day');
-        const effectivePreparationDay = findNextWeekday(prepStart);
+        const effectivePreparationDay = findNextWorkingDay(prepStart);
 
         const deliveryDayIndexSet = new Set(deliveryDayIndexes.map(day => day.index));
         const upcomingDeliveries = [];
