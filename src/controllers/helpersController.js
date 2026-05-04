@@ -6,6 +6,7 @@ import OpenAI from 'openai';
 import moment from 'moment';
 import XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
+import csvParser from 'csv-parser';
 import findDeliveryDayByComuna, { resolveDispatchCutoffHourByComuna } from '../utils/findDeliveryDate.js'; // Import the function to find delivery day by comuna
 import findRappiDeliveryDayByComuna from '../utils/findRappiDeliveryDate.js';
 import foundSpecialCustomers from '../services/foundSpecialCustomers.js';
