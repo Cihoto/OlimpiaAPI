@@ -49,7 +49,12 @@ import { google }        from 'googleapis';
 import path              from 'path';
 import { fileURLToPath } from 'url';
 import fs                from 'fs';
-import { MongoClient }   from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
+import XLSX              from 'xlsx';
+import {
+    ensureTTLIndexes,
+    getSnapshotsCollection
+} from './auditStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -73,6 +78,171 @@ async function getCollection() {
     const dbName  = process.env.MONGO_CLIENTS_DB_NAME  || 'chatbot';
     const colName = process.env.MONGO_CLIENTS_COLLECTION || 'OlimpiaClients';
     return _client.db(dbName).collection(colName);
+}
+
+async function getOlimpiaClientsClient() {
+    await getCollection(); // garantiza _client conectado
+    return _client;
+}
+
+// Guardrail por defecto: abortar si las filas nuevas son menos del 50% del estado actual.
+const DEFAULT_MIN_ROWS_PERCENT = 0.5;
+// Regex estricto para detectar (no para filtrar) RUTs con formato canónico chileno.
+const STRICT_RUT_REGEX = /^(?:\d{1,3}\.\d{3}\.\d{3}|\d{7,9})-[\dkK]$/;
+
+/**
+ * Limpia una fila para insertarla en OlimpiaClients:
+ *   - Aplana line endings (\r\r\n, \r\n, \r → \n)
+ *   - Trim de espacios al inicio/fin de strings
+ *   - NO toca formato de precios (preserva como vienen)
+ *   - Quita campos internos del snapshot (_compositeKey, _syncHash)
+ *   - Agrega campos de auditoría (_appliedFromSnapshotId, _appliedAt)
+ */
+function normalizeRowForMongo(rawRow, snapshotObjectId, appliedAt) {
+    const out = {};
+    for (const [key, value] of Object.entries(rawRow)) {
+        if (key.startsWith('_')) continue; // descarta _compositeKey, _syncHash y _id del snapshot
+        if (typeof value === 'string') {
+            out[key] = value
+                .replace(/\r\r\n/g, '\n')
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .trim();
+        } else {
+            out[key] = value;
+        }
+    }
+    out._appliedFromSnapshotId = snapshotObjectId;
+    out._appliedAt = appliedAt;
+    return out;
+}
+
+/**
+ * Aplica un snapshot guardado a OlimpiaClients usando hard reset atómico
+ * (deleteMany + insertMany en transacción). Sólo se aplica si pasa el guardrail.
+ *
+ * @param {string|ObjectId} snapshotIdInput
+ * @param {object} options
+ * @param {boolean} options.force          — bypass del guardrail (default false)
+ * @param {number}  options.minRowsPercent — porcentaje mínimo del current count (default 0.5)
+ * @returns {Promise<object>} stats del apply
+ */
+export async function applySnapshotToOlimpiaClients(snapshotIdInput, options = {}) {
+    const force = Boolean(options.force);
+    const minRowsPercent = Number.isFinite(options.minRowsPercent)
+        ? options.minRowsPercent
+        : DEFAULT_MIN_ROWS_PERCENT;
+
+    const snapshotId = typeof snapshotIdInput === 'string'
+        ? new ObjectId(snapshotIdInput)
+        : snapshotIdInput;
+
+    const snapshotsCol = await getSnapshotsCollection();
+    const snapshot = await snapshotsCol.findOne({ _id: snapshotId });
+    if (!snapshot) {
+        throw new Error(`Snapshot ${snapshotIdInput} no encontrado en Olimpia._sheetSyncSnapshots`);
+    }
+    if (!Array.isArray(snapshot.rows) || snapshot.rows.length === 0) {
+        throw new Error('Snapshot vacío — abortando para no destruir OlimpiaClients');
+    }
+
+    // Filtra filas con RUT (sin RUT no vale para Mongo: el resto del código matchea por RUT)
+    const validRows = snapshot.rows.filter((r) => String(r.RUT || '').trim() !== '');
+    if (validRows.length === 0) {
+        throw new Error('Snapshot sin filas con RUT — abortando para no destruir OlimpiaClients');
+    }
+
+    const olimpiaClientsCol = await getCollection();
+    const currentCount = await olimpiaClientsCol.countDocuments();
+
+    // Guardrail
+    if (!force && currentCount > 0) {
+        const minRequired = Math.floor(currentCount * minRowsPercent);
+        if (validRows.length < minRequired) {
+            throw new Error(
+                `Guardrail (${Math.round(minRowsPercent * 100)}%): snapshot trae ${validRows.length} filas con RUT, ` +
+                `menos del mínimo de ${minRequired} (current=${currentCount}). ` +
+                `No se aplica para evitar borrado masivo accidental. ` +
+                `Si esto es intencional, llamar al endpoint con ?force=true.`
+            );
+        }
+    }
+
+    // Detecta duplicados por composite key (NO los filtra — se insertan ambos)
+    const keysSeen = new Map();
+    const duplicateSamples = [];
+    for (let i = 0; i < validRows.length; i += 1) {
+        const r = validRows[i];
+        const compositeKey = `${String(r.RUT).trim()}::${String(r.NAME || r['COMPANY NAME'] || '').trim().toLowerCase()}`;
+        if (keysSeen.has(compositeKey)) {
+            duplicateSamples.push({
+                key: compositeKey,
+                firstSnapshotIndex: keysSeen.get(compositeKey),
+                duplicateSnapshotIndex: i
+            });
+        } else {
+            keysSeen.set(compositeKey, i);
+        }
+    }
+    if (duplicateSamples.length > 0) {
+        console.warn(`[applySnapshot] ${duplicateSamples.length} duplicados por composite key (se insertan ambos):`);
+        for (const d of duplicateSamples.slice(0, 5)) {
+            console.warn(`  ${d.key}`);
+        }
+    }
+
+    // Detecta RUTs malformados (NO los filtra — se insertan tal cual, sólo log warning)
+    const malformedRutSamples = [];
+    for (const r of validRows) {
+        if (!STRICT_RUT_REGEX.test(String(r.RUT).trim())) {
+            malformedRutSamples.push({ rut: r.RUT, name: r.NAME || r['COMPANY NAME'] || '' });
+        }
+    }
+    if (malformedRutSamples.length > 0) {
+        console.warn(`[applySnapshot] ${malformedRutSamples.length} RUTs con formato no canónico (se insertan tal cual):`);
+        for (const m of malformedRutSamples.slice(0, 5)) {
+            console.warn(`  "${m.rut}" → ${m.name}`);
+        }
+    }
+
+    // Normaliza cada fila para insertar
+    const appliedAt = new Date();
+    const docsToInsert = validRows.map((r) => normalizeRowForMongo(r, snapshotId, appliedAt));
+
+    // Hard reset atómico: deleteMany + insertMany en una transacción
+    const client = await getOlimpiaClientsClient();
+    const session = client.startSession();
+    let deletedCount = 0;
+    let insertedCount = 0;
+    try {
+        await session.withTransaction(async () => {
+            const deleteRes = await olimpiaClientsCol.deleteMany({}, { session });
+            const insertRes = await olimpiaClientsCol.insertMany(docsToInsert, { session, ordered: true });
+            deletedCount = deleteRes.deletedCount;
+            insertedCount = insertRes.insertedCount;
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    // Marca el snapshot como aplicado
+    await snapshotsCol.updateOne(
+        { _id: snapshotId },
+        { $set: { appliedAt, appliedRowsCount: insertedCount } }
+    );
+
+    return {
+        snapshotId: String(snapshotId),
+        snapshotTotalRows: snapshot.totalRows,
+        validRowsCount: validRows.length,
+        deletedFromOlimpiaClients: deletedCount,
+        insertedToOlimpiaClients: insertedCount,
+        duplicatesDetected: duplicateSamples.length,
+        malformedRutsDetected: malformedRutSamples.length,
+        guardrailPercent: minRowsPercent,
+        forceBypass: force,
+        appliedAt: appliedAt.toISOString()
+    };
 }
 
 // ── Google Sheets ────────────────────────────────────────────────────────────
@@ -152,84 +322,120 @@ function computeHash(row) {
  *
  * @returns {Promise<{inserted, updated, skipped, deleted, total, durationMs}>}
  */
-export async function syncKnowledgebase() {
+export async function syncKnowledgebase(options = {}) {
     const t0 = Date.now();
-    const stats = { inserted: 0, updated: 0, skipped: 0, deleted: 0, total: 0 };
 
-    // 1. Leer sheet
+    // 1. Leer Sheet
     const sheetRows = await fetchSheetRows();
-    stats.total = sheetRows.length;
-
-    // DEBUG: log de la primera fila para verificar formato
-    console.log(`[sheetsSyncService] ${sheetRows.length} filas obtenidas del sheet. Ejemplo:`);
-    console.log(JSON.stringify(sheetRows[0], null, 2));
-
-    //return boolean para probar endpoint sin hacer nada, luego comentar para activar la lógica completa
-    return true;
-
     if (sheetRows.length === 0) {
         throw new Error(
             'El sheet no devolvió filas. ' +
             'Verifica GOOGLE_SPREADSHEET_ID, GOOGLE_SHEETS_RANGE, y que el sheet esté compartido con el service account.'
         );
     }
+    console.log(`[sheetsSyncService] ${sheetRows.length} filas obtenidas del sheet`);
 
-    // 2. Construir índice sheet con hash precalculado
-    const sheetIndex = new Map();
-    for (const row of sheetRows) {
-        const key = makeCompositeKey(row);
-        if (key === '::') continue;  // Fila sin RUT ni NAME — saltar
-        sheetIndex.set(key, { ...row, _syncHash: computeHash(row) });
-    }
+    // 2. Persistir snapshot en Olimpia._sheetSyncSnapshots (siempre — audit trail)
+    const snapshotIdString = await saveSheetSnapshotToAuditDb(sheetRows);
+    console.log(`[sheetsSyncService] Snapshot guardado en Olimpia._sheetSyncSnapshots: ${snapshotIdString}`);
 
-    // 3. Leer MongoDB (solo campos necesarios para comparar — sin traer todo el doc)
-    const col = await getCollection();
-    const mongoDocs = await col.find(
-        {},
-        { projection: { _id: 1, _syncHash: 1, RUT: 1, NAME: 1, 'COMPANY NAME': 1 } }
-    ).toArray();
-
-    const mongoIndex = new Map();
-    for (const doc of mongoDocs) {
-        mongoIndex.set(makeCompositeKey(doc), doc);
-    }
-
-    // 4. Upsert: insertar nuevos, actualizar cambiados, saltear idénticos
-    for (const [key, row] of sheetIndex) {
-        const existing = mongoIndex.get(key);
-
-        if (!existing) {
-            await col.insertOne({ ...row, _syncedAt: new Date() });
-            stats.inserted++;
-        } else if (existing._syncHash !== row._syncHash) {
-            await col.updateOne(
-                { _id: existing._id },
-                { $set: { ...row, _syncedAt: new Date() } }
-            );
-            stats.updated++;
-        } else {
-            stats.skipped++;
-        }
-    }
-
-    // 5. Hard delete: en Mongo pero ya no en el sheet
-    for (const [key, doc] of mongoIndex) {
-        if (!sheetIndex.has(key)) {
-            await col.deleteOne({ _id: doc._id });
-            stats.deleted++;
-        }
-    }
-
-    stats.durationMs = Date.now() - t0;
-
+    // 3. Aplicar a OlimpiaClients (hard reset atómico con guardrail)
+    const applyResult = await applySnapshotToOlimpiaClients(snapshotIdString, options);
     console.log(
-        `[sheetsSyncService] Sync completado — ` +
-        `inserted:${stats.inserted} updated:${stats.updated} ` +
-        `skipped:${stats.skipped} deleted:${stats.deleted} ` +
-        `total:${stats.total} (${stats.durationMs}ms)`
+        `[sheetsSyncService] OlimpiaClients hard-reset: ` +
+        `deleted=${applyResult.deletedFromOlimpiaClients} inserted=${applyResult.insertedToOlimpiaClients} ` +
+        `dupes=${applyResult.duplicatesDetected} badRuts=${applyResult.malformedRutsDetected}`
     );
 
-    return stats;
+    // 4. Excel local SOLO en development (en producción /tmp es efímero)
+    let localExcelPath = null;
+    if (process.env.NODE_ENV !== 'production') {
+        try {
+            localExcelPath = await dumpSheetRowsToExcel(sheetRows);
+            console.log(`[sheetsSyncService] (dev) Snapshot Excel local: ${localExcelPath}`);
+        } catch (err) {
+            console.error('[sheetsSyncService] (dev) No se pudo guardar Excel local:', err.message);
+        }
+    }
+
+    return {
+        mode: 'APPLIED_HARD_RESET',
+        snapshotId: snapshotIdString,
+        applyResult,
+        localExcelPath,
+        durationMs: Date.now() - t0
+    };
+}
+
+/**
+ * Inserta un snapshot completo de las filas del Sheet en
+ * Olimpia._sheetSyncSnapshots, agregando _compositeKey y _syncHash a cada fila.
+ * @param {object[]} sheetRows
+ * @returns {Promise<string>} _id (string) del documento insertado
+ */
+async function saveSheetSnapshotToAuditDb(sheetRows) {
+    await ensureTTLIndexes();
+    const col = await getSnapshotsCollection();
+    const now = new Date();
+    const enrichedRows = sheetRows.map((row) => ({
+        ...row,
+        _compositeKey: makeCompositeKey(row),
+        _syncHash: computeHash(row)
+    }));
+    const doc = {
+        createdAt: now,
+        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID || '',
+        range: process.env.GOOGLE_SHEETS_RANGE || 'Sheet1',
+        totalRows: sheetRows.length,
+        rows: enrichedRows
+    };
+    const result = await col.insertOne(doc);
+    return String(result.insertedId);
+}
+
+/**
+ * Vuelca todas las filas del Sheet a un archivo Excel local.
+ * Genera dos hojas: "rows" con datos crudos del sheet + columna `_syncHash`
+ * calculada igual que el sync original, y "meta" con el resumen.
+ * @param {object[]} sheetRows
+ * @returns {Promise<string>} Path absoluto del archivo generado
+ */
+async function dumpSheetRowsToExcel(sheetRows) {
+    const outputDir = path.resolve(process.cwd(), 'tmp', 'sheet-sync-snapshots');
+    if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const outputPath = path.join(outputDir, `sheet-snapshot-${stamp}.xlsx`);
+
+    const headers = Object.keys(sheetRows[0] || {});
+    const rowsWithHash = sheetRows.map((row) => ({
+        ...row,
+        _compositeKey: makeCompositeKey(row),
+        _syncHash: computeHash(row)
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const rowsSheet = XLSX.utils.json_to_sheet(rowsWithHash, {
+        header: [...headers, '_compositeKey', '_syncHash']
+    });
+    XLSX.utils.book_append_sheet(workbook, rowsSheet, 'rows');
+
+    const metaRows = [
+        { campo: 'generado_en', valor: new Date().toISOString() },
+        { campo: 'total_filas', valor: sheetRows.length },
+        { campo: 'spreadsheet_id', valor: process.env.GOOGLE_SPREADSHEET_ID || '' },
+        { campo: 'range', valor: process.env.GOOGLE_SHEETS_RANGE || 'Sheet1' },
+        { campo: 'mongo_db', valor: process.env.MONGO_CLIENTS_DB_NAME || 'chatbot' },
+        { campo: 'mongo_collection', valor: process.env.MONGO_CLIENTS_COLLECTION || 'OlimpiaClients' },
+        { campo: 'mongo_writes', valor: 'DISABLED — snapshot only' }
+    ];
+    const metaSheet = XLSX.utils.json_to_sheet(metaRows);
+    XLSX.utils.book_append_sheet(workbook, metaSheet, 'meta');
+
+    XLSX.writeFile(workbook, outputPath);
+    return outputPath;
 }
 
 // ── Preflight (dry-run, cero escrituras) ─────────────────────────────────────

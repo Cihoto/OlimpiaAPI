@@ -5871,8 +5871,9 @@ async function syncKnowledgebaseHandler(req, res) {
     }
 
     try {
+        const force = req.query?.force === 'true' || req.body?.force === true;
         const { syncKnowledgebase } = await import('../services/sheetsSyncService.js');
-        const stats = await syncKnowledgebase();
+        const stats = await syncKnowledgebase({ force });
         return res.status(200).json({ success: true, ...stats });
     } catch (error) {
         console.error('[syncKnowledgebaseHandler] Error:', error.message);
