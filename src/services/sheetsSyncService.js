@@ -246,17 +246,56 @@ export async function applySnapshotToOlimpiaClients(snapshotIdInput, options = {
 }
 
 // ── Google Sheets ────────────────────────────────────────────────────────────
-function getGoogleAuth() {
-    if (!fs.existsSync(KEY_FILE_PATH)) {
-        throw new Error(
-            `Service account key no encontrado en: ${KEY_FILE_PATH}\n` +
-            `Coloca el archivo JSON de la cuenta de servicio en esa ruta.`
-        );
+const GOOGLE_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
+
+/**
+ * Resuelve las credenciales del service account en este orden de preferencia:
+ *   1. GOOGLE_SERVICE_ACCOUNT_JSON  → contenido del JSON inline (recomendado para Render)
+ *   2. GOOGLE_APPLICATION_CREDENTIALS → path absoluto al archivo (estándar Google)
+ *   3. KEY_FILE_PATH                  → path local del repo (default para dev)
+ *
+ * Devuelve un objeto descriptivo con `source`, `credentials` o `keyFile`,
+ * y un mensaje de error si nada está disponible.
+ */
+function resolveServiceAccountSource() {
+    const inlineJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    if (inlineJson && inlineJson.trim()) {
+        try {
+            const parsed = JSON.parse(inlineJson);
+            if (parsed.type !== 'service_account') {
+                throw new Error(`Tipo esperado "service_account", encontrado "${parsed.type}"`);
+            }
+            return { source: 'env:GOOGLE_SERVICE_ACCOUNT_JSON', credentials: parsed };
+        } catch (err) {
+            throw new Error(
+                `GOOGLE_SERVICE_ACCOUNT_JSON está seteado pero no es JSON válido: ${err.message}`
+            );
+        }
     }
-    return new google.auth.GoogleAuth({
-        keyFile: KEY_FILE_PATH,
-        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-    });
+
+    const envKeyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (envKeyFile && fs.existsSync(envKeyFile)) {
+        return { source: 'env:GOOGLE_APPLICATION_CREDENTIALS', keyFile: envKeyFile };
+    }
+
+    if (fs.existsSync(KEY_FILE_PATH)) {
+        return { source: 'file:KEY_FILE_PATH', keyFile: KEY_FILE_PATH };
+    }
+
+    throw new Error(
+        `No se encontraron credenciales del service account. Opciones:\n` +
+        `  1. Setear env GOOGLE_SERVICE_ACCOUNT_JSON con el contenido del JSON\n` +
+        `  2. Setear env GOOGLE_APPLICATION_CREDENTIALS con el path al archivo (Render Secret File)\n` +
+        `  3. Colocar el archivo en ${KEY_FILE_PATH} (solo dev local)`
+    );
+}
+
+function getGoogleAuth() {
+    const src = resolveServiceAccountSource();
+    if (src.credentials) {
+        return new google.auth.GoogleAuth({ credentials: src.credentials, scopes: GOOGLE_SCOPES });
+    }
+    return new google.auth.GoogleAuth({ keyFile: src.keyFile, scopes: GOOGLE_SCOPES });
 }
 
 /**
@@ -492,17 +531,19 @@ export async function preflightSyncKnowledgebase() {
         return { required: Object.fromEntries(Object.entries(required).map(([k]) => [k, '(set)'])), optional };
     });
 
-    // ── Paso 2: Service account file ─────────────────────────────────────────
+    // ── Paso 2: Service account credentials (env var inline o archivo) ───────
     await runStep('serviceAccountFile', () => {
-        if (!fs.existsSync(KEY_FILE_PATH)) {
-            throw new Error(`Archivo no encontrado: ${KEY_FILE_PATH}`);
-        }
-        const raw = fs.readFileSync(KEY_FILE_PATH, 'utf8');
+        const src = resolveServiceAccountSource();
         let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        } catch {
-            throw new Error(`El archivo existe pero no es JSON válido: ${KEY_FILE_PATH}`);
+        if (src.credentials) {
+            parsed = src.credentials;
+        } else {
+            const raw = fs.readFileSync(src.keyFile, 'utf8');
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                throw new Error(`El archivo existe pero no es JSON válido: ${src.keyFile}`);
+            }
         }
         const requiredFields = ['type', 'project_id', 'client_email', 'private_key'];
         const missingFields = requiredFields.filter(f => !parsed[f]);
@@ -513,7 +554,8 @@ export async function preflightSyncKnowledgebase() {
             throw new Error(`tipo esperado "service_account", encontrado "${parsed.type}"`);
         }
         return {
-            path: KEY_FILE_PATH,
+            source: src.source,
+            path: src.keyFile || '(env inline)',
             project_id: parsed.project_id,
             client_email: parsed.client_email,
             type: parsed.type,
