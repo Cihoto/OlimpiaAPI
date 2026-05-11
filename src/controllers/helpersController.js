@@ -1785,7 +1785,7 @@ function resolveManualOcDeliveryDay({
     return null;
 }
 
-function buildManualOcBillingPayload({ mergedResult, ocDateConfirmed, arrivalDateTime }) {
+function buildManualOcBillingPayload({ mergedResult, ocDateConfirmed, arrivalDateTime, detectedOrderNumber }) {
     const merged = mergedResult?.merged || {};
     const emailData = merged?.EmailData || {};
     const clientData = merged?.ClientData?.data || merged?.ClientData || {};
@@ -1873,7 +1873,23 @@ function buildManualOcBillingPayload({ mergedResult, ocDateConfirmed, arrivalDat
         paymentCondition: paymentConditionRaw !== null && paymentConditionRaw !== undefined
             ? String(paymentConditionRaw).trim()
             : '',
-        attachedDocuments: [],
+        attachedDocuments: (() => {
+            const ocNumber = String(detectedOrderNumber || emailData?.Orden_de_Compra || '').trim();
+            if (!ocNumber) {
+                return [];
+            }
+            const rawDate = ocDateConfirmed || merged?.OC_date || null;
+            const date = rawDate
+                ? rawDate.includes('-') && rawDate.indexOf('-') === 4
+                    ? rawDate.split('-').reverse().join('-')
+                    : rawDate
+                : null;
+            return [{
+                folio: ocNumber,
+                documentType: 801,
+                date: date || ''
+            }];
+        })(),
         ventaRecDesGlobal: [],
         isTransferDocument: true
     };
@@ -1926,6 +1942,7 @@ async function sendManualMergedToMake({
     arrivalDateTime,
     uploadedBy,
     fileMeta,
+    detectedOrderNumber = null,
     developerMode = false,
     submitRequest = null,
     makeOptions = null
@@ -1937,7 +1954,8 @@ async function sendManualMergedToMake({
     const billingPayload = buildManualOcBillingPayload({
         mergedResult,
         ocDateConfirmed,
-        arrivalDateTime
+        arrivalDateTime,
+        detectedOrderNumber
     });
 
     const builtAtChile = toChileTimestampParts(null, { fallbackToNow: true });
@@ -4712,6 +4730,7 @@ async function readManualOcSubmit(req, res) {
             arrivalDateTime: arrivalInfo.dateTimeIso,
             uploadedBy: uploadedBy || record.uploadedBy,
             fileMeta: record.fileMeta || null,
+            detectedOrderNumber: detectedOrderNumber || null,
             developerMode,
             makeOptions: {
                 mode: makeMode,
