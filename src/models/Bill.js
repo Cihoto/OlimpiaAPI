@@ -809,7 +809,6 @@ class Bill {
                 };
             }
             const saleBusinessCenter = await this.#getSaleBusinessCenterAccounts(businessCenterCode.code);
-            console.log("esto falla por la cara")
             console.log(saleBusinessCenter);
             if (!saleBusinessCenter.success) {
                 console.log({ "NOTpass": "NOTpass" });

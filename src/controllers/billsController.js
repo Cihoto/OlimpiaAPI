@@ -15,6 +15,7 @@ import {
     markDeliveryReservationAsCommitted,
     markDeliveryReservationAsFailed
 } from '../services/deliveryCapacityService.js';
+import { maybeRecordDispatchAndAlert } from '../services/dispatchRegistryService.js';
 
 function pickFirstDefinedValue(candidates) {
     for (const value of candidates) {
@@ -280,7 +281,12 @@ async function createBill(req, res) {
 
         // FROM HERE
 
-        const { body } = req;
+        // Compat: acepta tanto { BillingData, ClientData } como el body plano legacy.
+        // Una vez que Make migre todos los flujos al envelope, el fallback se puede retirar.
+        const incomingBody = req.body || {};
+        const body = incomingBody.BillingData !== undefined ? incomingBody.BillingData : incomingBody;
+        const clientData = incomingBody.ClientData || null;
+
         let reservationReference = null;
         if (body.reservationId !== undefined && body.reservationId !== null && body.reservationId !== '') {
             reservationReference = String(body.reservationId).trim();
@@ -441,25 +447,38 @@ async function createBill(req, res) {
 
         console.log(BILLJSON);
 
-        // Comentar fetch a Defontana para pruebas sin consumir cupo y simular respuesta exitosa de facturación
-        const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`
-        console.log("saveSaleURL", saveSaleURL);
-        const createBillDefontana = await fetch(saveSaleURL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${req.apiKey}`
-            },
-            body: JSON.stringify(BILLJSON)
-        });
+        // Modo simulado para staging/ngrok: bypassea Defontana y devuelve una respuesta
+        // exitosa sin consumir cupo real. Activar con DEFONTANA_SIMULATE=true.
+        const isDefontanaSimulated = String(process.env.DEFONTANA_SIMULATE || '').toLowerCase() === 'true';
 
-        createBillDefontanaResponse = await createBillDefontana.json();
-        console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+        if (isDefontanaSimulated) {
+            const simulatedId = `SIM-${Date.now()}`;
+            createBillDefontanaResponse = {
+                success: true,
+                message: 'Venta Guardada Exitosamente (SIMULADA)',
+                invoiceId: simulatedId,
+                folio: simulatedId,
+                simulated: true
+            };
+            console.log('[DEFONTANA_SIMULATE=true] Respuesta simulada:', createBillDefontanaResponse);
+        } else {
+            const saveSaleURL = `${process.env.SALE_API_URL}SaveSale`;
+            console.log("saveSaleURL", saveSaleURL);
+            const createBillDefontana = await fetch(saveSaleURL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${req.apiKey}`
+                },
+                body: JSON.stringify(BILLJSON)
+            });
+
+            createBillDefontanaResponse = await createBillDefontana.json();
+            console.log("createBillDefontanaResponse", createBillDefontanaResponse);
+        }
 
         const invoiceStatus = resolveInvoiceStatus(createBillDefontanaResponse);
 
-        // Por ahora, simular que la factura se emite correctamente en Defontana para probar flujo de reservas de entrega y notificaciones sin consumir cupo real en Defontana.
-        // const invoiceStatus = FACTURADO_STATUS;
         // TODO: Manejar estado PENDING_VERIFY sin consumir cupo cuando Defontana quede incierto.
         if (deliveryReservationInBilling?.reservationId) {
             if (invoiceStatus === FACTURADO_STATUS) {
@@ -496,10 +515,39 @@ async function createBill(req, res) {
             });
         }
 
+        // Registro de dispatch_records + alerta por sucursal duplicada el mismo día.
+        // Observacional: errores se capturan y NO fallan la facturación.
+        let dispatchRegistry;
+        try {
+            const dispatchInvoiceId = resolveInvoiceId({
+                requestBody: body,
+                billJson: BILLJSON,
+                defontanaResponse: createBillDefontanaResponse
+            });
+            const dispatchSource = typeof incomingBody.source === 'string' && incomingBody.source.trim()
+                ? incomingBody.source.trim()
+                : 'unknown';
+            dispatchRegistry = await maybeRecordDispatchAndAlert({
+                billingData: body,
+                clientData,
+                billJson: BILLJSON,
+                invoiceId: dispatchInvoiceId,
+                invoiceStatus,
+                source: dispatchSource
+            });
+        } catch (error) {
+            console.error('Error registrando dispatch_record:', error);
+            dispatchRegistry = {
+                attempted: true,
+                error: error?.message || String(error)
+            };
+        }
+
         const responsePayload = {
             success: true,
             data: BILLJSON,
             notificationEmail,
+            dispatchRegistry,
             deliveryReservation: deliveryReservationInBilling
         };
 

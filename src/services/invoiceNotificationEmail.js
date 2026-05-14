@@ -101,7 +101,10 @@ function getMailRecipients() {
     return recipients;
 }
 
-async function sendNotificationEmail({ subject, text }) {
+// `recipients` (array opcional) override del MAIL_RECIPIENT global.
+// `html` (string opcional) habilita renderizado rico en clientes compatibles;
+// `text` siempre va como fallback para clientes en plain-text.
+async function sendNotificationEmail({ subject, text, html, recipients }) {
     if (!subject || !String(subject).trim()) {
         throw new Error('subject es requerido para enviar correo');
     }
@@ -112,14 +115,16 @@ async function sendNotificationEmail({ subject, text }) {
 
     const resend = getResendClient();
     const from = getMailFrom();
-    const recipients = getMailRecipients();
+    const to = Array.isArray(recipients) && recipients.length > 0
+        ? recipients
+        : getMailRecipients();
 
-    const { data, error } = await resend.emails.send({
-        from,
-        to: recipients,
-        subject,
-        text
-    });
+    const payload = { from, to, subject, text };
+    if (html && String(html).trim()) {
+        payload.html = String(html);
+    }
+
+    const { data, error } = await resend.emails.send(payload);
 
     if (error) {
         throw new Error(`Error al enviar correo con Resend: ${error.message || JSON.stringify(error)}`);
@@ -128,7 +133,7 @@ async function sendNotificationEmail({ subject, text }) {
     return {
         messageId: data?.id || null,
         fromEmail: from,
-        recipientEmail: recipients.join(',')
+        recipientEmail: to.join(',')
     };
 }
 
