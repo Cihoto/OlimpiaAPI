@@ -16,6 +16,7 @@ import morgan from 'morgan';
 import Bill from './src/models/Bill.js';
 import cors from 'cors';
 import bannerRoutes from './src/routes/bannerRouter.js';
+import reportsRoutes from './src/routes/reports.js';
 import { fileURLToPath } from 'url';
 import moment from 'moment';
 import { startDeliveryCapacityCleanupCron } from './src/services/deliveryCapacityService.js';
@@ -198,6 +199,7 @@ app.get('/', async (req, res) => {
 
 app.use('/api/banner', bannerRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/reports', reportsRoutes);
 
 
 

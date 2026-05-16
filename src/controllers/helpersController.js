@@ -5931,5 +5931,8 @@ export {
     readManualOcDispatchPreview,
     readManualOcSubmit,
     syncKnowledgebaseHandler,
-    preflightSyncKnowledgebaseHandler
+    preflightSyncKnowledgebaseHandler,
+    buildManualOcBillingPayload,
+    buildManualOcArrivalDateTime,
+    resolveManualOcDispatchCutoffHour
 };

@@ -27,3 +27,18 @@ src/documents/ASDASDASDAS.csv
 /AGENTS.md
 /instructions/codex-subagents.md
 /context/
+
+# Outputs de auditoría / debug de la sesión de cobranza (NO subir)
+audit_*.json
+diagnose_*.json
+inspect_folio_*.json
+scan_last_*.json
+comparison_result.json
+/fixearFactuasJSON/
+/fixearFactuasJSON_READY/
+
+# Scripts ad-hoc de exploración local (los que empiezan con _)
+/_*.js
+/_*.cjs
+/_*.json
+/asd.json
