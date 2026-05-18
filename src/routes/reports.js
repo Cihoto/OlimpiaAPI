@@ -17,6 +17,7 @@ import { generateFlujoReport } from '../services/flujoReportService.js';
 import { generateMorosasExcel } from '../services/morosasExcelService.js';
 import { syncFactoring, getFactoringSyncStatus } from '../services/factoringSyncService.js';
 import { listAllFactoring, getSyncStatus as getFactoringMetaStatus } from '../services/mongoFactoringCache.js';
+import { discoverFactoringVoucherTypes } from '../services/factoringDiscoveryService.js';
 
 const router = Router();
 
@@ -264,6 +265,28 @@ router.get('/sync/factoring/list', async (req, res) => {
         const docs = await listAllFactoring();
         res.json({ success: true, count: docs.length, items: docs });
     } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// GET /reports/sync/factoring/discover?from=YYYY-MM-DD&to=YYYY-MM-DD&candidates=TIPO1,TIPO2
+// Escanea Defontana probando una lista de voucher types plausibles y reporta
+// cuáles tienen vouchers con líneas de cesión. Sirve para descubrir voucher
+// types que estamos ignorando (ej: confirming bancario, cesión directa).
+// No modifica datos.
+router.get('/sync/factoring/discover', async (req, res) => {
+    if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
+    const from = req.query.from ? String(req.query.from) : undefined;
+    const to = req.query.to ? String(req.query.to) : undefined;
+    const candidates = req.query.candidates
+        ? String(req.query.candidates).split(',').map(s => s.trim()).filter(Boolean)
+        : undefined;
+    const sampleSize = req.query.sample ? Number(req.query.sample) : undefined;
+    try {
+        const report = await discoverFactoringVoucherTypes(req.apiKey, { from, to, candidates, sampleSize });
+        res.json({ success: true, ...report });
+    } catch (error) {
+        console.error('[factoring discover] error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

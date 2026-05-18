@@ -145,19 +145,21 @@ function buildResumenSheet(wb, snap, rows) {
         byCat[cat].total += r.saldo || 0;
     }
 
-    // KPI cards (row 4..7, 3 columnas)
-    const kpiTitles = ['Total moroso', 'Vencen hoy', 'Total filas'];
+    // KPI cards (row 4..7, 4 columnas)
+    const kpiTitles = ['Total moroso', 'Vencen hoy', 'Pendiente futuro', 'Total filas'];
     const kpiValues = [
         byCat['Morosa']?.total ?? 0,
         byCat['Vence hoy']?.total ?? 0,
+        byCat['Pendiente (no vencida)']?.total ?? 0,
         rows.length
     ];
     const kpiCounts = [
         byCat['Morosa']?.count ?? 0,
         byCat['Vence hoy']?.count ?? 0,
+        byCat['Pendiente (no vencida)']?.count ?? 0,
         null
     ];
-    const kpiColors = [COLORS.rose, COLORS.amber, COLORS.zinc700];
+    const kpiColors = [COLORS.rose, COLORS.amber, COLORS.indigo, COLORS.zinc700];
 
     ws.getRow(4).height = 8;
     for (let i = 0; i < kpiTitles.length; i++) {
@@ -552,22 +554,29 @@ export async function generateMorosasExcel({ includeAll = true, withFactoring = 
     wb.created = new Date();
     wb.properties.date1904 = false;
 
-    // Trabajamos solo con lo realmente cobrable: morosas + vence hoy.
-    // Pendientes (vencimiento futuro) y "créditos a favor" (apuntes contables
-    // negativos sin sustento real) se descartan para evitar inflar el reporte.
-    const cobrables = rows.filter(r => r.esMoroso || r.venceHoy);
-
-    // 1) Morosa
-    buildCategorySheet(wb, 'Morosa', cobrables, 'Morosa', clientsMap, folioMetaMap, factoringMap, columns);
+    // 1) Morosa = morosas reales (diasMora > 0) + pendientes (no vencidas) con
+    // diasMora forzado a 0. Vence hoy también entra a Morosa con sus 0 días.
+    // Los pendientes pierden su signo negativo en días para no confundir al lector.
+    const morosaCombined = rows
+        .filter(r => r.esMoroso || r.venceHoy || (r.esFactura && !r.esCreditoCliente))
+        .map(r => {
+            if (r.esMoroso || r.venceHoy) return r;
+            // Es Pendiente (no vencida) — copiar con diasMora normalizado a 0
+            return { ...r, diasMora: 0, esMoroso: true, bucket: bucketLabel(0) };
+        });
+    buildCategorySheet(wb, 'Morosa', morosaCombined, 'Morosa', clientsMap, folioMetaMap, factoringMap, columns);
 
     // 2) Resumen ejecutivo
-    buildResumenSheet(wb, snap, cobrables);
+    buildResumenSheet(wb, snap, rows);
 
-    // 3) Vence hoy
-    buildCategorySheet(wb, 'Vence hoy', cobrables, 'Vence hoy', clientsMap, folioMetaMap, factoringMap, columns);
+    // 3) Vence hoy — sólo los que vencen exactamente hoy (también están dentro de Morosa)
+    buildCategorySheet(wb, 'Vence hoy', rows, 'Vence hoy', clientsMap, folioMetaMap, factoringMap, columns);
 
-    // 4) Todo detallado (solo lo cobrable, con tag de categoría)
-    buildAllDetailSheet(wb, cobrables, clientsMap, folioMetaMap, factoringMap, columns);
+    // 4) Pendiente — sólo las pendientes (no vencidas) con su diasMora real (negativo)
+    buildCategorySheet(wb, 'Pendiente', rows, 'Pendiente (no vencida)', clientsMap, folioMetaMap, factoringMap, columns);
+
+    // 5) Todo detallado (con tag de categoría)
+    buildAllDetailSheet(wb, rows, clientsMap, folioMetaMap, factoringMap, columns);
 
     const suffix = withFactoring ? '' : '-sin-factoring';
     const buffer = await wb.xlsx.writeBuffer();

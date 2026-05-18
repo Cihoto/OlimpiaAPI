@@ -35,10 +35,19 @@ async function getMeta() {
 }
 
 // Upsert: si el folio ya existe, suma la cesión nueva a su array y recalcula totales.
-export async function recordFactoringCession({ folio, docType, voucherNumber, fiscalYear, date, amount, company, companyRut }) {
+export async function recordFactoringCession({ folio, docType, voucherNumber, fiscalYear, date, amount, company, companyRut, glossRaw, voucherType }) {
     if (!folio || !docType || !amount) return null;
     const col = await getCol();
-    const cession = { voucherNumber, fiscalYear, date: date ? new Date(date) : null, amount, company: company || null, companyRut: companyRut || null };
+    const cession = {
+        voucherNumber,
+        fiscalYear,
+        date: date ? new Date(date) : null,
+        amount,
+        company: company || null,
+        companyRut: companyRut || null,
+        glossRaw: glossRaw || null,
+        voucherType: voucherType || null
+    };
 
     // Buscar si ya existe esta cesión (mismo voucher) para no duplicar
     const existing = await col.findOne({ folio, docType, 'cessions.voucherNumber': voucherNumber, 'cessions.fiscalYear': fiscalYear });
@@ -79,8 +88,9 @@ export async function listAllFactoring() {
     return col.find({}).toArray();
 }
 
-// Devuelve un Set con los vouchers ya procesados (clave "fiscalYear:voucherNumber").
+// Devuelve un Set con los vouchers ya procesados (clave "fiscalYear:voucherNumber:voucherType").
 // Sirve para sync incremental — el batch puede saltarse GetVoucher si ya conoce el voucher.
+// Incluimos voucherType porque distintos tipos pueden tener números repetidos.
 export async function getKnownVoucherKeys() {
     const col = await getCol();
     const docs = await col.find({}, { projection: { cessions: 1 } }).toArray();
@@ -88,6 +98,11 @@ export async function getKnownVoucherKeys() {
     for (const d of docs) {
         for (const c of d.cessions || []) {
             if (c.voucherNumber != null && c.fiscalYear != null) {
+                // Clave nueva incluye voucherType. Mantenemos también la clave legacy
+                // sin tipo para que vouchers viejos (sin voucherType guardado) no
+                // se re-procesen.
+                const vt = c.voucherType || 'TRASPASOFACTORING';
+                keys.add(`${c.fiscalYear}:${c.voucherNumber}:${vt}`);
                 keys.add(`${c.fiscalYear}:${c.voucherNumber}`);
             }
         }
