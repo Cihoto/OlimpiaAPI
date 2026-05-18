@@ -14,6 +14,9 @@ import {
 } from '../services/mongoCobranzaSnapshots.js';
 import { enrichFolios, getEnrichmentStatus } from '../services/folioEnrichmentService.js';
 import { generateFlujoReport } from '../services/flujoReportService.js';
+import { generateMorosasExcel } from '../services/morosasExcelService.js';
+import { syncFactoring, getFactoringSyncStatus } from '../services/factoringSyncService.js';
+import { listAllFactoring, getSyncStatus as getFactoringMetaStatus } from '../services/mongoFactoringCache.js';
 
 const router = Router();
 
@@ -116,23 +119,45 @@ router.post('/morosas/snapshot', async (req, res) => {
 });
 
 // GET /reports/morosas/latest — último snapshot guardado.
-// Enriquece on-the-fly con folios_meta (emisión + monto total) si están cacheadas.
+// Enriquece on-the-fly con folios_meta (emisión + monto total) y con factoring.
 router.get('/morosas/latest', async (req, res) => {
     if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
     try {
         const snap = await getLatestSnapshot({ type: 'morosas' });
         if (!snap) return res.json({ success: true, snapshot: null });
 
-        // Enriquecer rows con folios_meta del cache
         const { getFolioMetaMap } = await import('../services/mongoFolioMeta.js');
+        const { getFactoringMap } = await import('../services/mongoFactoringCache.js');
         const pairs = (snap.rows || []).map(r => ({ folio: r.folio, docType: r.docType }));
-        const metaMap = await getFolioMetaMap(pairs);
+
+        const [metaMap, factoringMap] = await Promise.all([
+            getFolioMetaMap(pairs),
+            getFactoringMap(pairs).catch(() => new Map())
+        ]);
+
         for (const r of snap.rows || []) {
             const m = metaMap.get(`${r.docType}:${r.folio}`);
             if (m) {
                 if (m.emissionDate) r.emissionDate = m.emissionDate;
                 if (m.total != null) r.totalOriginal = m.total;
                 if (m.sellerFileId && !r.sellerFileId) r.sellerFileId = m.sellerFileId;
+            }
+            const f = factoringMap.get(`${r.docType}:${r.folio}`);
+            if (f) {
+                r.factoring = {
+                    totalCedido: f.totalCedido || 0,
+                    company: f.factoringCompany || null,
+                    companyRut: f.factoringRut || null,
+                    lastCessionDate: f.lastCessionDate || null,
+                    cessions: (f.cessions || []).map(c => ({
+                        voucherNumber: c.voucherNumber,
+                        fiscalYear: c.fiscalYear,
+                        date: c.date,
+                        amount: c.amount,
+                        company: c.company,
+                        companyRut: c.companyRut
+                    }))
+                };
             }
         }
 
@@ -183,6 +208,66 @@ router.get('/morosas/enrich/status', async (req, res) => {
 });
 
 // ============ VISTA 2: FLUJO PROYECTADO ============
+// GET /reports/morosas/excel?withFactoring=true|false
+// Descarga Excel enriquecido del último snapshot. Por default incluye las 4
+// columnas de factoring; pasar withFactoring=false para el formato clásico.
+router.get('/morosas/excel', async (req, res) => {
+    if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
+    try {
+        const includeAll = String(req.query.includeAll || 'true').toLowerCase() !== 'false';
+        const withFactoring = String(req.query.withFactoring ?? 'true').toLowerCase() !== 'false';
+        const { buffer, filename } = await generateMorosasExcel({ includeAll, withFactoring });
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        res.send(buffer);
+    } catch (error) {
+        console.error('[reports/morosas/excel] error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============ FACTORING ============
+// POST /reports/sync/factoring?from=YYYY-MM-DD&to=YYYY-MM-DD&fullReset=true
+// Dispara batch que pega a Defontana GetVoucherList?VoucherType=TRASPASOFACTORING
+// y llena el cache `folio_factoring`. Fire and forget.
+router.post('/sync/factoring', async (req, res) => {
+    if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
+    const from = req.query.from ? String(req.query.from) : undefined;
+    const to = req.query.to ? String(req.query.to) : undefined;
+    const fullReset = String(req.query.fullReset || 'false').toLowerCase() === 'true';
+
+    const current = getFactoringSyncStatus();
+    if (current.isRunning) {
+        return res.json({ success: true, started: false, reason: 'already_running', progress: current.progress });
+    }
+    // Fire and forget
+    syncFactoring(req.apiKey, { from, to, fullReset })
+        .catch(err => console.error('[factoring sync] error:', err));
+    res.json({ success: true, started: true, from: from || 'auto', to: to || 'auto', fullReset });
+});
+
+// GET /reports/sync/factoring/status
+router.get('/sync/factoring/status', async (req, res) => {
+    try {
+        const live = getFactoringSyncStatus();
+        const meta = await getFactoringMetaStatus();
+        res.json({ success: true, live, meta });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// GET /reports/sync/factoring/list — dump del cache para inspección
+router.get('/sync/factoring/list', async (req, res) => {
+    try {
+        const docs = await listAllFactoring();
+        res.json({ success: true, count: docs.length, items: docs });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // GET /reports/flujo?horizonte=60&atras=90&granularity=day
 router.get('/flujo', async (req, res) => {
     if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });

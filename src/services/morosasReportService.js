@@ -40,14 +40,17 @@ function bucketize(diasMora) {
     return '90+';
 }
 
-// Defontana representa cada folio como N filas (factura + NC + asientos contra).
-// REGLA (validada con CSV de Antonio):
-//   - Si las líneas de un folio suman exactamente 0 → factura totalmente compensada,
-//     se descartan TODAS las líneas (no aparece en el reporte de cobranza).
-//   - Si suman distinto de 0 → cada línea se mantiene como fila independiente
-//     (la línea positiva entra como morosa; la negativa como crédito a favor).
+// Defontana representa cada folio como N filas (factura + apuntes contables).
+// REGLA (validada contra CSV de Antonio en MOROSAS):
+//   - Agrupamos por (docType, folio) para descartar folios totalmente compensados.
+//   - Si netSum ≈ 0 → folio saldado, descartar todas las líneas.
+//   - Si netSum ≠ 0 → emitimos cada línea como row independiente y dejamos que
+//     el clasificador decida. La línea positiva alimenta Morosa/Pendiente/VenceHoy;
+//     la negativa alimentaría "Crédito a favor" — PERO esa categoría está
+//     desactivada en el Excel/UI porque Defontana incluye traspasos contables
+//     internos (especialmente factoring) que distorsionan ese saldo.
+// Solo mostramos al usuario lo que matchea con Antonio: morosas y vence hoy.
 function mapDocumentsToRows(documents) {
-    // Agrupar por (docType, folio) para evaluar compensación
     const byFolio = new Map();
     for (const d of documents) {
         const key = `${d.idTipoDocumento || ''}:${d.number}`;
@@ -58,9 +61,9 @@ function mapDocumentsToRows(documents) {
     const rows = [];
     for (const [, lines] of byFolio) {
         const netSum = lines.reduce((s, l) => s + (l.amount || 0), 0);
-        if (Math.abs(netSum) < 1) continue; // folio totalmente compensado: descartar todas las líneas
+        if (Math.abs(netSum) < 1) continue;
         for (const d of lines) {
-            if (Math.abs(d.amount) < 1) continue; // línea sin saldo individual
+            if (Math.abs(d.amount) < 1) continue;
             rows.push({
                 folio: d.number,
                 docType: d.idTipoDocumento,
