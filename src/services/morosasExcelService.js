@@ -524,30 +524,42 @@ async function buildClientsMap() {
     return map;
 }
 
-export async function generateMorosasExcel({ includeAll = true, withFactoring = true } = {}) {
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.includeAll=true]
+ * @param {boolean} [opts.withFactoring=true]  Si false, oculta las 4 columnas de factoring
+ * @param {boolean} [opts.excludeFactoringRows=false]  Si true, ELIMINA las filas de folios con factoring
+ */
+export async function generateMorosasExcel({ includeAll = true, withFactoring = true, excludeFactoringRows = false } = {}) {
     const snap = await getLatestSnapshot({ type: 'morosas' });
     if (!snap) {
         throw new Error('No hay snapshot disponible. Generá primero un reporte de cobranza.');
     }
 
-    const rows = snap.rows || [];
-    const pairs = rows.map(r => ({ folio: r.folio, docType: r.docType }));
-
+    const allPairs = (snap.rows || []).map(r => ({ folio: r.folio, docType: r.docType }));
     const columns = buildColumns(withFactoring);
 
-    const baseFetches = [
-        getFolioMetaMap(pairs),
-        buildClientsMap()
-    ];
+    // Si necesitamos saber qué folios tienen factoring (sea para mostrar columnas
+    // o para filtrar filas), traemos el cache.
+    const needFactoringMap = withFactoring || excludeFactoringRows;
     const [folioMetaMap, clientsMap, factoringMap] = await Promise.all([
-        ...baseFetches,
-        withFactoring
-            ? getFactoringMap(pairs).catch(err => {
+        getFolioMetaMap(allPairs),
+        buildClientsMap(),
+        needFactoringMap
+            ? getFactoringMap(allPairs).catch(err => {
                 console.warn('[excel] factoring map fallback (vacío):', err.message);
                 return new Map();
             })
             : Promise.resolve(new Map())
     ]);
+
+    // Filtrar filas con factoring si se pidió
+    const rows = excludeFactoringRows
+        ? (snap.rows || []).filter(r => {
+            const fact = factoringMap.get(`${r.docType}:${r.folio}`);
+            return !fact || !fact.totalCedido;
+        })
+        : (snap.rows || []);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Olimpia Cobranza';
@@ -578,7 +590,7 @@ export async function generateMorosasExcel({ includeAll = true, withFactoring = 
     // 5) Todo detallado (con tag de categoría)
     buildAllDetailSheet(wb, rows, clientsMap, folioMetaMap, factoringMap, columns);
 
-    const suffix = withFactoring ? '' : '-sin-factoring';
+    const suffix = excludeFactoringRows ? '-sin-factoring' : (withFactoring ? '' : '-clasico');
     const buffer = await wb.xlsx.writeBuffer();
     return {
         buffer: Buffer.from(buffer),

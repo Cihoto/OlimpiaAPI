@@ -211,15 +211,19 @@ router.get('/morosas/enrich/status', async (req, res) => {
 });
 
 // ============ VISTA 2: FLUJO PROYECTADO ============
-// GET /reports/morosas/excel?withFactoring=true|false
-// Descarga Excel enriquecido del último snapshot. Por default incluye las 4
-// columnas de factoring; pasar withFactoring=false para el formato clásico.
+// GET /reports/morosas/excel?withFactoring=true|false&excludeFactoringRows=true|false
+//   withFactoring=false → oculta las 4 columnas de factoring
+//   excludeFactoringRows=true → ELIMINA las filas de folios con factoring (también oculta columnas)
 router.get('/morosas/excel', async (req, res) => {
     if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
     try {
         const includeAll = String(req.query.includeAll || 'true').toLowerCase() !== 'false';
-        const withFactoring = String(req.query.withFactoring ?? 'true').toLowerCase() !== 'false';
-        const { buffer, filename } = await generateMorosasExcel({ includeAll, withFactoring });
+        const excludeFactoringRows = String(req.query.excludeFactoringRows ?? 'false').toLowerCase() === 'true';
+        // Si se excluyen filas con factoring, las columnas pierden sentido → forzar withFactoring=false
+        const withFactoring = excludeFactoringRows
+            ? false
+            : String(req.query.withFactoring ?? 'true').toLowerCase() !== 'false';
+        const { buffer, filename } = await generateMorosasExcel({ includeAll, withFactoring, excludeFactoringRows });
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Cache-Control', 'no-cache');
