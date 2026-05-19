@@ -18,6 +18,8 @@ import { generateMorosasExcel } from '../services/morosasExcelService.js';
 import { syncFactoring, getFactoringSyncStatus } from '../services/factoringSyncService.js';
 import { listAllFactoring, getSyncStatus as getFactoringMetaStatus } from '../services/mongoFactoringCache.js';
 import { discoverFactoringVoucherTypes } from '../services/factoringDiscoveryService.js';
+import { sweepDeadFromLatestSnapshot, getDeadSweepStatus } from '../services/deadFoliosSweepService.js';
+import { runCobranzaMaintenance, getCobranzaCronStatus } from '../services/cobranzaCronService.js';
 
 const router = Router();
 
@@ -256,6 +258,46 @@ router.get('/sync/factoring/status', async (req, res) => {
         res.json({ success: true, live, meta });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST /reports/sync/folios-muertos
+// Dispara sweep XML SII sobre los folios del último snapshot. Fire-and-forget.
+router.post('/sync/folios-muertos', async (req, res) => {
+    if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
+    const current = getDeadSweepStatus();
+    if (current.isRunning) {
+        return res.json({ success: true, started: false, reason: 'already_running', progress: current.progress });
+    }
+    sweepDeadFromLatestSnapshot(req.apiKey, { source: req.query.source || 'on-demand' })
+        .catch(err => console.error('[dead sweep] error:', err));
+    res.json({ success: true, started: true });
+});
+
+// POST /reports/cron/run-now — dispara el ciclo completo de mantenimiento on-demand.
+router.post('/cron/run-now', async (req, res) => {
+    if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
+    const status = getCobranzaCronStatus();
+    if (status.isRunning) {
+        return res.json({ success: true, started: false, reason: 'already_running' });
+    }
+    runCobranzaMaintenance({ logger: console }).catch(err => console.error('[cron run-now] error:', err));
+    res.json({ success: true, started: true });
+});
+
+// GET /reports/cron/status
+router.get('/cron/status', async (req, res) => {
+    res.json({ success: true, ...getCobranzaCronStatus() });
+});
+
+// GET /reports/sync/folios-muertos/status
+router.get('/sync/folios-muertos/status', async (req, res) => {
+    try {
+        const { getLastVerifiedAt } = await import('../services/mongoDeadFolios.js');
+        const lastSweepAt = await getLastVerifiedAt();
+        res.json({ success: true, ...getDeadSweepStatus(), lastSweepAt });
+    } catch (error) {
+        res.json({ success: true, ...getDeadSweepStatus(), lastSweepAt: null });
     }
 });
 

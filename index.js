@@ -20,6 +20,7 @@ import reportsRoutes from './src/routes/reports.js';
 import { fileURLToPath } from 'url';
 import moment from 'moment';
 import { startDeliveryCapacityCleanupCron } from './src/services/deliveryCapacityService.js';
+import { startCobranzaCron } from './src/services/cobranzaCronService.js';
 import { syncKnowledgebase } from './src/services/sheetsSyncService.js';
 
 import findDeliveryDayByComuna from './src/utils/findDeliveryDate.js'; // Import the function
@@ -210,6 +211,17 @@ startDeliveryCapacityCleanupCron({
   runOnStart: true,
   logger: console
 });
+
+// Cron interno de cobranza: sync factoring + sweep folios muertos + regen snapshot.
+// Default: 1×/día, 06:00 hora Chile. Se desactiva con COBRANZA_CRON_DISABLED=true.
+if (process.env.COBRANZA_CRON_DISABLED !== 'true') {
+  startCobranzaCron({
+    intervalHours: Number(process.env.COBRANZA_CRON_INTERVAL_HOURS || 24),
+    runOnStart: process.env.COBRANZA_CRON_RUN_ON_START === 'true',
+    targetHourChile: Number(process.env.COBRANZA_CRON_HOUR_CHILE || 6),
+    logger: console
+  });
+}
 
 // Start server
 const PORT = process.env.PORT || 5000;

@@ -53,3 +53,11 @@ export async function getLastScannedFolio(docType) {
     const last = await col.find({ docType }).sort({ folio: -1 }).limit(1).toArray();
     return last[0]?.folio || null;
 }
+
+// Timestamp del último folio verificado (cualquier classification). Sirve
+// para mostrar al usuario cuándo se corrió el último sweep.
+export async function getLastVerifiedAt() {
+    const col = await getCollection();
+    const last = await col.find({ verifiedAt: { $exists: true } }).sort({ verifiedAt: -1 }).limit(1).toArray();
+    return last[0]?.verifiedAt || null;
+}

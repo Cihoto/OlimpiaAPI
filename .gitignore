@@ -36,6 +36,7 @@ scan_last_*.json
 comparison_result.json
 /fixearFactuasJSON/
 /fixearFactuasJSON_READY/
+/render-cron.md
 
 # Scripts ad-hoc de exploración local (los que empiezan con _)
 /_*.js

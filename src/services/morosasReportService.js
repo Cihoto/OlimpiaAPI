@@ -42,14 +42,12 @@ function bucketize(diasMora) {
 
 // Defontana representa cada folio como N filas (factura + apuntes contables).
 // REGLA (validada contra CSV de Antonio en MOROSAS):
-//   - Agrupamos por (docType, folio) para descartar folios totalmente compensados.
-//   - Si netSum ≈ 0 → folio saldado, descartar todas las líneas.
-//   - Si netSum ≠ 0 → emitimos cada línea como row independiente y dejamos que
-//     el clasificador decida. La línea positiva alimenta Morosa/Pendiente/VenceHoy;
-//     la negativa alimentaría "Crédito a favor" — PERO esa categoría está
-//     desactivada en el Excel/UI porque Defontana incluye traspasos contables
-//     internos (especialmente factoring) que distorsionan ese saldo.
-// Solo mostramos al usuario lo que matchea con Antonio: morosas y vence hoy.
+//   - Agrupamos por (docType, folio).
+//   - Si netSum ≈ 0  → folio totalmente compensado, descartar todas las líneas.
+//   - Si netSum < 0  → cliente tiene saldo a favor o pago duplicado en ese folio.
+//                       Descartar todas las líneas (el cliente NO debe nada).
+//   - Si netSum > 0  → emitimos cada línea como row independiente. La lógica
+//                       posterior decide morosa/vence hoy/pendiente/crédito.
 function mapDocumentsToRows(documents) {
     const byFolio = new Map();
     for (const d of documents) {
@@ -61,7 +59,7 @@ function mapDocumentsToRows(documents) {
     const rows = [];
     for (const [, lines] of byFolio) {
         const netSum = lines.reduce((s, l) => s + (l.amount || 0), 0);
-        if (Math.abs(netSum) < 1) continue;
+        if (netSum < 1) continue; // saldado (=0) o cliente a favor (<0) → fuera
         for (const d of lines) {
             if (Math.abs(d.amount) < 1) continue;
             rows.push({
