@@ -381,7 +381,18 @@ async function createBill(req, res) {
 
         console.log("prodQtyToAdd", prodQtyToAdd);
 
-        if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true")) {
+        // RUTs exentos del recargo de despacho por caja única (normalizados: sin puntos/guion, mayúscula).
+        //   76.865.177-9 = CONVENIENCE DE CHILE SPA
+        //   77.125.361-K = DELIVERY HERO STORES CHILE SPA
+        const SHIPPING_SURCHARGE_EXEMPT_RUTS = new Set(['768651779', '77125361K']);
+        const clientRutKey = String(body.clientFile || '').replace(/[.\-\s]/g, '').toUpperCase();
+        const isShippingExemptClient = SHIPPING_SURCHARGE_EXEMPT_RUTS.has(clientRutKey);
+
+        if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true") && isShippingExemptClient) {
+            console.log(`Cliente ${body.clientFile} exento de recargo de despacho por caja unica — no se agrega ítem.`);
+        }
+
+        if (prodQtyToAdd === 1 && (body.isDelivery === true || body.isDelivery === "true") && !isShippingExemptClient) {
             const normalizedRegion = String(body.region || '').toUpperCase().trim();
             console.log("Agregando costo de despacho segun region:", body.region);
             if (normalizedRegion === "RM") {

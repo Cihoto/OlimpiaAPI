@@ -213,12 +213,11 @@ startDeliveryCapacityCleanupCron({
 });
 
 // Cron interno de cobranza: sync factoring + sweep folios muertos + regen snapshot.
-// Default: 1×/día, 06:00 hora Chile. Se desactiva con COBRANZA_CRON_DISABLED=true.
+// Default: cada 4 horas. Se desactiva con COBRANZA_CRON_DISABLED=true.
 if (process.env.COBRANZA_CRON_DISABLED !== 'true') {
   startCobranzaCron({
-    intervalHours: Number(process.env.COBRANZA_CRON_INTERVAL_HOURS || 24),
+    intervalHours: Number(process.env.COBRANZA_CRON_INTERVAL_HOURS || 4),
     runOnStart: process.env.COBRANZA_CRON_RUN_ON_START === 'true',
-    targetHourChile: Number(process.env.COBRANZA_CRON_HOUR_CHILE || 6),
     logger: console
   });
 }

@@ -306,7 +306,7 @@ class Bill {
                 { code: "CREDITO306090", name: ["CREDITO306090", "3690"], paymentDays: 30 },
                 { code: "CHEQUE", name: ["CHEQUE", "C1","CHEQUE (1 DÍA)"], paymentDays: 1 },
                 { code: "CHEQUE15DIAS", name: ["CHEQUE15DIAS", "C15","CHEQUE (15 DÍAS)"], paymentDays: 15 },
-                { code: "CHEQUE30DIAS", name: ["CHEQUE30DIAS", "C30","CHEQUE (30 DÍAS)"], paymentDays: 30 },
+                { code: "CHEQUE30IAS", name: ["CHEQUE30IAS", "CHEQUE30DIAS", "C30","CHEQUE (30 DÍAS)"], paymentDays: 30 },
                 { code: "CREDITO5", name: ["CREDITO5", "5"], paymentDays: 5 },
                 { code: "CREDITO60", name: ["CREDITO60", "60"], paymentDays: 60 },
                 { code: "CREDITO90", name: ["CREDITO90", "90"], paymentDays: 90 }

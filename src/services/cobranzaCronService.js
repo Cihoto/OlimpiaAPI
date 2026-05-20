@@ -18,9 +18,14 @@ import { listClients } from './mongoClientsCache.js';
 let isRunning = false;
 let lastRunAt = null;
 let lastResult = null;
+let progress = { stage: 'idle', label: 'Inactivo', percent: 0 };
 
 export function getCobranzaCronStatus() {
-    return { isRunning, lastRunAt, lastResult };
+    return { isRunning, progress, lastRunAt, lastResult };
+}
+
+function setProgress(stage, label, percent) {
+    progress = { stage, label, percent: Math.round(percent) };
 }
 
 /**
@@ -34,21 +39,25 @@ export async function runCobranzaMaintenance({ logger = console } = {}) {
 
     try {
         tag('=== INICIO MANTENIMIENTO ===');
+        setProgress('starting', 'Conectando con Defontana…', 1);
         await fetchApiKey();
         const apiKey = getApiKey();
 
         // 1) Factoring incremental
         tag('1/3 sync factoring (incremental)…');
+        setProgress('factoring', 'Sincronizando factoring…', 5);
         const factResult = await syncFactoring(apiKey, { fullReset: false });
         tag(`  factoring: ${factResult.cesionesEncontradas || 0} cesiones · skipped: ${factResult.skipped || 0}`);
 
         // 2) Sweep XML SII
         tag('2/3 sweep folios muertos…');
+        setProgress('sweep', 'Detectando facturas muertas…', 25);
         const sweep = await sweepDeadFromLatestSnapshot(apiKey, { source: 'cron-internal' });
         tag(`  sweep: ${sweep.deadFound || 0} muertos · ${sweep.transientErrors || 0} err transitorios`);
 
         // 3) Regen snapshot
         tag('3/3 regenerando snapshot…');
+        setProgress('snapshot', 'Regenerando reporte de cobranza…', 45);
         const clients = await listClients();
         const ruts = clients.map(c => c.legalCode || c.fileID).filter(Boolean);
 
@@ -62,6 +71,9 @@ export async function runCobranzaMaintenance({ logger = console } = {}) {
             for (const r of results) {
                 if (r.status === 'fulfilled' && r.value?.rows) allRows.push(...r.value.rows);
             }
+            // El regen ocupa el rango 45%-95% del total
+            const ratio = Math.min(1, (i + CHUNK) / ruts.length);
+            setProgress('snapshot', `Regenerando reporte · ${Math.min(i + CHUNK, ruts.length)}/${ruts.length} clientes`, 45 + ratio * 50);
         }
 
         const morosas = allRows.filter(r => r.esMoroso);
@@ -78,6 +90,7 @@ export async function runCobranzaMaintenance({ logger = console } = {}) {
             buckets
         };
 
+        setProgress('saving', 'Guardando reporte…', 96);
         await saveSnapshot({
             type: 'morosas', rows: allRows, summary,
             source: 'cron-internal', generatedBy: 'system',
@@ -87,17 +100,20 @@ export async function runCobranzaMaintenance({ logger = console } = {}) {
         const dur = Math.round((Date.now() - start) / 1000);
         tag(`snapshot: ${allRows.length} filas · ${morosas.length} morosas · $${summary.morosasTotal.toLocaleString('es-CL')}`);
         tag(`=== FIN (${dur}s) ===`);
+        setProgress('done', 'Completado', 100);
 
         lastResult = {
             ok: true, elapsedSec: dur,
             factoring: factResult.cesionesEncontradas || 0,
             deadDetected: sweep.deadFound || 0,
             morosasCount: morosas.length,
-            morosasTotal: summary.morosasTotal
+            morosasTotal: summary.morosasTotal,
+            generatedAt: new Date().toISOString()
         };
         return { success: true, ...lastResult };
     } catch (error) {
         logger.error('[cobranzaCron] error:', error);
+        setProgress('error', 'Error: ' + error.message, 0);
         lastResult = { ok: false, error: error.message };
         return { success: false, error: error.message };
     } finally {
@@ -107,14 +123,12 @@ export async function runCobranzaMaintenance({ logger = console } = {}) {
 }
 
 /**
- * Arranca el cron in-process.
- * Por default: corre 1×/día. Primera corrida demorada hasta las 6 AM hora Chile
- * (o inmediato si COBRANZA_CRON_RUN_ON_START=true).
+ * Arranca el cron in-process. Corre cada `intervalHours` (default 4h).
+ * La primera corrida es a las `intervalHours` del arranque, salvo runOnStart=true.
  */
 export function startCobranzaCron({
-    intervalHours = 24,
+    intervalHours = 4,
     runOnStart = false,
-    targetHourChile = 6,
     logger = console
 } = {}) {
     const intervalMs = intervalHours * 60 * 60 * 1000;
@@ -124,27 +138,15 @@ export function startCobranzaCron({
     };
 
     if (runOnStart) {
-        logger.log('[cobranzaCron] arrancando corrida inmediata');
+        logger.log('[cobranzaCron] corrida inmediata al arranque');
         tick();
     }
 
-    // Calcular ms hasta la próxima hora objetivo (6 AM Chile = 10 AM UTC en horario estándar / 09 UTC en horario verano).
-    // Para simplificar usamos UTC offset -4 (CLT) que es el más común.
-    const now = new Date();
-    const target = new Date(now);
-    target.setUTCHours((targetHourChile + 4) % 24, 0, 0, 0); // 06:00 Chile = 10:00 UTC
-    if (target <= now) target.setUTCDate(target.getUTCDate() + 1); // mañana
-    const msUntilFirst = target.getTime() - now.getTime();
-    logger.log(`[cobranzaCron] primera corrida programada para ${target.toISOString()} (en ${Math.round(msUntilFirst / 60000)} min)`);
-
-    const firstTimer = setTimeout(() => {
-        tick();
-        // A partir de ahí, intervalo regular
-        setInterval(tick, intervalMs);
-    }, msUntilFirst);
+    logger.log(`[cobranzaCron] programado cada ${intervalHours}h`);
+    const timer = setInterval(tick, intervalMs);
 
     return {
-        stop: () => clearTimeout(firstTimer),
+        stop: () => clearInterval(timer),
         runNow: tick
     };
 }
