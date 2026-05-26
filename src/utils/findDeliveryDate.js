@@ -9,11 +9,11 @@ const RM_DELIVERY_CUTOFF_HOUR_RAW = Number.parseInt(
 const REGIONAL_DELIVERY_CUTOFF_HOUR_RAW = Number.parseInt(
     process.env.DELIVERY_REGIONS_DISPATCH_CUTOFF_HOUR
     || process.env.DELIVERY_DISPATCH_CUTOFF_HOUR
-    || '13',
+    || '12',
     10
 );
 
-function normalizeCutoffHour(value, fallback = 13) {
+function normalizeCutoffHour(value, fallback = 12) {
     if (!Number.isFinite(value)) {
         return fallback;
     }
@@ -21,7 +21,7 @@ function normalizeCutoffHour(value, fallback = 13) {
 }
 
 const RM_DELIVERY_CUTOFF_HOUR = normalizeCutoffHour(RM_DELIVERY_CUTOFF_HOUR_RAW, 12);
-const REGIONAL_DELIVERY_CUTOFF_HOUR = normalizeCutoffHour(REGIONAL_DELIVERY_CUTOFF_HOUR_RAW, 13);
+const REGIONAL_DELIVERY_CUTOFF_HOUR = normalizeCutoffHour(REGIONAL_DELIVERY_CUTOFF_HOUR_RAW, 12);
 
 const REGION_V_ALIASES = new Set([
     'v',
@@ -217,7 +217,7 @@ function findNextBiweeklyRegionalDeliveryDay(scheduleCode, emailMoment) {
     }
 
     const orderDayStart = emailMoment.clone().startOf('day');
-    // Minute-precision cutoff: an order placed at exactly the cutoff hour (e.g. 13:00:00)
+    // Minute-precision cutoff: an order placed at exactly the cutoff hour (e.g. 12:00:00)
     // is NOT considered late – only orders strictly after that minute are.
     const orderMinutes = emailMoment.hour() * 60 + emailMoment.minute();
     const isAfterCutoff = orderMinutes > REGIONAL_DELIVERY_CUTOFF_HOUR * 60;

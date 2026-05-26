@@ -384,7 +384,8 @@ async function createBill(req, res) {
         // RUTs exentos del recargo de despacho por caja única (normalizados: sin puntos/guion, mayúscula).
         //   76.865.177-9 = CONVENIENCE DE CHILE SPA
         //   77.125.361-K = DELIVERY HERO STORES CHILE SPA
-        const SHIPPING_SURCHARGE_EXEMPT_RUTS = new Set(['768651779', '77125361K']);
+        //   77.393.795-8 = MOUSTACHE BEAMS SPA (Rappi Turbo)
+        const SHIPPING_SURCHARGE_EXEMPT_RUTS = new Set(['768651779', '77125361K', '773937958']);
         const clientRutKey = String(body.clientFile || '').replace(/[.\-\s]/g, '').toUpperCase();
         const isShippingExemptClient = SHIPPING_SURCHARGE_EXEMPT_RUTS.has(clientRutKey);
 
