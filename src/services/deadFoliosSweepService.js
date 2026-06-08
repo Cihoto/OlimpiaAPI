@@ -24,11 +24,24 @@ async function getJSON(url, apiKey) {
     catch { return { ok: r.ok, status: r.status, body: text }; }
 }
 
+// Devuelve:
+//   true  -> XML llegó al SII (folio vivo)
+//   false -> Defontana respondió OK y afirma explícitamente que NO hay XML (folio muerto)
+//   null  -> respuesta no concluyente (error HTTP, timeout, HTML, body no-JSON, success ausente)
+//
+// CRÍTICO: nunca devolver `false` ante un error de transporte/servidor. Un 500/429/HTML
+// de Defontana NO significa que la factura esté muerta; significa que no sabemos. Tratar
+// "el endpoint falló" como "muerto confirmado" corrompe el reporte de forma persistente
+// (incidente 2026-06-08: un glitch del endpoint XML marcó 453 facturas vivas como muertas).
 async function checkXmlOk(apiKey, docType, folio) {
     const url = `${SALE_BASE}GetXMLDocumentBase64?documentType=${encodeURIComponent(docType)}&number=${folio}`;
     try {
-        const { body } = await getJSON(url, apiKey);
-        return body?.success === true;
+        const { ok, body } = await getJSON(url, apiKey);
+        // Solo confiamos en una respuesta HTTP 2xx con JSON parseado.
+        if (!ok || typeof body !== 'object' || body === null) return null; // transitorio
+        if (body.success === true) return true;   // vivo
+        if (body.success === false) return false;  // muerto confirmado por Defontana
+        return null; // forma inesperada -> no arriesgar
     } catch {
         return null;
     }
@@ -59,6 +72,12 @@ export async function sweepDeadFolios(apiKey, pairs, opts = {}) {
 
     const concurrency = opts.concurrency ?? 10;
     const skipKnown = opts.skipKnownDead !== false;
+    // Circuit breaker: una corrida sana detecta unos pocos muertos. Si de golpe
+    // "muere" una fracción/cantidad implausible del batch, es un fallo upstream
+    // (token sin scope, caída del endpoint XML), NO una avalancha real de facturas
+    // muertas. En ese caso abortamos y NO persistimos nada.
+    const abortRate = opts.abortRate ?? 0.20;   // >20% del batch
+    const abortAbs = opts.abortAbs ?? 40;       // o >40 muertos absolutos
 
     progress = { stage: 'preparing', total: pairs.length, done: 0, deadFound: 0, transientErrors: 0 };
 
@@ -68,23 +87,49 @@ export async function sweepDeadFolios(apiKey, pairs, opts = {}) {
         progress.total = pendientes.length;
         progress.stage = 'scanning';
 
+        // Fase 1: escanear y RECOLECTAR candidatos a muerto (no persistir todavía).
+        const deadCandidates = [];
         await parallel(pendientes, concurrency, async (p) => {
             const ok = await checkXmlOk(apiKey, p.docType, p.folio);
             progress.done += 1;
             if (ok === false) {
                 progress.deadFound += 1;
-                await upsertFolioStatus({
-                    folio: p.folio,
-                    docType: p.docType,
-                    classification: 'muerto',
-                    xmlOk: false,
-                    verifiedAt: new Date(),
-                    verifiedBy: opts.source || 'sweep-service'
-                });
+                deadCandidates.push(p);
             } else if (ok === null) {
                 progress.transientErrors += 1;
             }
         });
+
+        // Fase 2: sanity check antes de persistir.
+        const n = pendientes.length;
+        const tooMany = deadCandidates.length > abortAbs && (n > 0 && deadCandidates.length / n > abortRate);
+        if (tooMany) {
+            progress.stage = 'aborted';
+            console.error(
+                `[deadSweep] ABORTADO: ${deadCandidates.length}/${n} folios saldrían "muertos" ` +
+                `(${(100 * deadCandidates.length / n).toFixed(0)}% > umbral). Probable fallo upstream de ` +
+                `GetXMLDocumentBase64 (transientErrors=${progress.transientErrors}). No se marcó ningún folio.`
+            );
+            return {
+                success: false,
+                aborted: true,
+                reason: 'implausible_dead_rate',
+                deadCandidates: deadCandidates.length,
+                ...progress
+            };
+        }
+
+        // Fase 3: persistir los muertos confirmados.
+        for (const p of deadCandidates) {
+            await upsertFolioStatus({
+                folio: p.folio,
+                docType: p.docType,
+                classification: 'muerto',
+                xmlOk: false,
+                verifiedAt: new Date(),
+                verifiedBy: opts.source || 'sweep-service'
+            });
+        }
 
         progress.stage = 'done';
         return { success: true, ...progress };
