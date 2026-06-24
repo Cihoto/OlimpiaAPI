@@ -6,12 +6,26 @@
 //
 // Mantiene estado en memoria del progreso para que el front pueda hacer polling.
 
-import { upsertFolioStatus, getDeadFolioSet } from './mongoDeadFolios.js';
+import { upsertFolioStatus, getDeadFolioSet, getDeadFolios, reviveFolios } from './mongoDeadFolios.js';
 
 const SALE_BASE = (process.env.SALE_API_URL || 'https://api.defontana.com/api/Sale/').replace(/\/+$/, '/');
 
+// Período de gracia: una factura recién emitida puede no tener todavía su XML
+// en el SII al momento del sweep. GetXMLDocumentBase64 devuelve success:false y
+// la marcábamos "muerta" de forma permanente (falso positivo). Durante este
+// período NO se marca muerto ningún folio aunque Defontana diga success:false.
+const GRACE_DAYS = Number(process.env.COBRANZA_DEAD_GRACE_DAYS || 7);
+
 let isRunning = false;
 let progress = { stage: 'idle', total: 0, done: 0, deadFound: 0, transientErrors: 0 };
+
+function isWithinGraceDays(emissionDate, graceDays = GRACE_DAYS) {
+    if (!emissionDate) return false; // sin fecha no podemos proteger; se evalúa normal
+    const em = new Date(emissionDate);
+    if (Number.isNaN(em.getTime())) return false;
+    const ageDays = (Date.now() - em.getTime()) / (1000 * 60 * 60 * 24);
+    return ageDays >= 0 && ageDays < graceDays;
+}
 
 export function getDeadSweepStatus() {
     return { isRunning, progress };
@@ -89,10 +103,17 @@ export async function sweepDeadFolios(apiKey, pairs, opts = {}) {
 
         // Fase 1: escanear y RECOLECTAR candidatos a muerto (no persistir todavía).
         const deadCandidates = [];
+        progress.protectedByGrace = 0;
         await parallel(pendientes, concurrency, async (p) => {
             const ok = await checkXmlOk(apiKey, p.docType, p.folio);
             progress.done += 1;
             if (ok === false) {
+                // Período de gracia: no matar facturas recién emitidas cuyo XML
+                // aún puede no estar en el SII (causa del reflood de falsos positivos).
+                if (isWithinGraceDays(p.emissionDate)) {
+                    progress.protectedByGrace += 1;
+                    return;
+                }
                 progress.deadFound += 1;
                 deadCandidates.push(p);
             } else if (ok === null) {
@@ -155,7 +176,39 @@ export async function sweepDeadFromLatestSnapshot(apiKey, opts = {}) {
         const k = `${r.docType}:${r.folio}`;
         if (seen.has(k)) continue;
         seen.add(k);
-        pairs.push({ folio: r.folio, docType: r.docType });
+        pairs.push({ folio: r.folio, docType: r.docType, emissionDate: r.emissionDate });
     }
     return sweepDeadFolios(apiKey, pairs, opts);
+}
+
+/**
+ * Self-healing: re-verifica los folios marcados 'muerto' y des-marca los que
+ * resultan vivos (GetXMLDocumentBase64.success === true). Convierte el flag
+ * 'muerto' de permanente a auto-corregible: si un folio se marcó por un glitch
+ * transitorio o antes de que su XML estuviera en el SII, vuelve solo a CxC.
+ * LEE de Defontana (GET) + ESCRIBE solo en nuestra Mongo (nunca en Defontana).
+ * @param {string} apiKey
+ * @param {object} [opts]
+ * @param {number} [opts.concurrency=10]
+ * @param {string} [opts.source]
+ * @param {number} [opts.limit] re-verificar a lo más N (los más recientes por verifiedAt)
+ */
+export async function reviveResurrectedFolios(apiKey, opts = {}) {
+    const concurrency = opts.concurrency ?? 10;
+    let dead = await getDeadFolios();
+    if (opts.limit && dead.length > opts.limit) {
+        dead = dead.slice()
+            .sort((a, b) => new Date(b.verifiedAt || 0) - new Date(a.verifiedAt || 0))
+            .slice(0, opts.limit);
+    }
+    let checked = 0, alive = 0, transient = 0;
+    const toRevive = [];
+    await parallel(dead, concurrency, async (d) => {
+        const ok = await checkXmlOk(apiKey, d.docType, d.folio);
+        checked += 1;
+        if (ok === true) { alive += 1; toRevive.push({ folio: d.folio, docType: d.docType }); }
+        else if (ok === null) { transient += 1; }
+    });
+    const { revived } = await reviveFolios(toRevive, { by: opts.source || 'revive-service' });
+    return { success: true, deadTotal: dead.length, checked, alive, transient, revived };
 }

@@ -48,6 +48,32 @@ export async function getDeadFolioSet({ docType = null } = {}) {
     return new Set(docs.map(d => `${d.docType}:${d.folio}`));
 }
 
+// Des-marca folios que estaban como 'muerto' pero resultaron vivos al re-verificar.
+// NO los borra: cambia classification a 'revivido' y conserva auditoría. Como
+// getDeadFolios()/getDeadFolioSet() filtran classification:'muerto', un folio
+// 'revivido' deja de excluirse del reporte y vuelve a cuentas por cobrar.
+// @param {Array<{folio:number,docType:string}>} pairs
+export async function reviveFolios(pairs, { by = 'revive-service' } = {}) {
+    if (!Array.isArray(pairs) || pairs.length === 0) return { revived: 0 };
+    const col = await getCollection();
+    const ops = pairs.map(p => ({
+        updateOne: {
+            filter: { folio: p.folio, docType: p.docType, classification: 'muerto' },
+            update: {
+                $set: {
+                    classification: 'revivido',
+                    xmlOk: true,
+                    revivedAt: new Date(),
+                    revivedBy: by,
+                    updatedAt: new Date()
+                }
+            }
+        }
+    }));
+    const res = await col.bulkWrite(ops, { ordered: false });
+    return { revived: res.modifiedCount || 0 };
+}
+
 export async function getLastScannedFolio(docType) {
     const col = await getCollection();
     const last = await col.find({ docType }).sort({ folio: -1 }).limit(1).toArray();

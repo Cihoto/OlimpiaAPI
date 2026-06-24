@@ -10,7 +10,7 @@
 
 import { fetchApiKey, getApiKey } from '../middleware/auth.js';
 import { syncFactoring } from './factoringSyncService.js';
-import { sweepDeadFromLatestSnapshot } from './deadFoliosSweepService.js';
+import { sweepDeadFromLatestSnapshot, reviveResurrectedFolios } from './deadFoliosSweepService.js';
 import { generateMorosasReport } from './morosasReportService.js';
 import { saveSnapshot } from './mongoCobranzaSnapshots.js';
 import { listClients } from './mongoClientsCache.js';
@@ -53,7 +53,14 @@ export async function runCobranzaMaintenance({ logger = console } = {}) {
         tag('2/3 sweep folios muertos…');
         setProgress('sweep', 'Detectando facturas muertas…', 25);
         const sweep = await sweepDeadFromLatestSnapshot(apiKey, { source: 'cron-internal' });
-        tag(`  sweep: ${sweep.deadFound || 0} muertos · ${sweep.transientErrors || 0} err transitorios`);
+        tag(`  sweep: ${sweep.deadFound || 0} muertos · ${sweep.transientErrors || 0} err transitorios · ${sweep.protectedByGrace || 0} protegidos por gracia`);
+
+        // 2b) Revival self-healing: des-marcar folios que volvieron a estar vivos
+        // (falsos positivos por glitch transitorio o XML aún no emitido al barrer).
+        tag('2b/3 revival de folios resucitados…');
+        setProgress('revive', 'Recuperando facturas mal marcadas…', 38);
+        const revive = await reviveResurrectedFolios(apiKey, { source: 'cron-internal' });
+        tag(`  revival: ${revive.revived || 0} revividos de ${revive.deadTotal || 0} muertos · ${revive.transient || 0} transitorios`);
 
         // 3) Regen snapshot
         tag('3/3 regenerando snapshot…');

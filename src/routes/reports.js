@@ -18,7 +18,7 @@ import { generateMorosasExcel } from '../services/morosasExcelService.js';
 import { syncFactoring, getFactoringSyncStatus } from '../services/factoringSyncService.js';
 import { listAllFactoring, getSyncStatus as getFactoringMetaStatus } from '../services/mongoFactoringCache.js';
 import { discoverFactoringVoucherTypes } from '../services/factoringDiscoveryService.js';
-import { sweepDeadFromLatestSnapshot, getDeadSweepStatus } from '../services/deadFoliosSweepService.js';
+import { sweepDeadFromLatestSnapshot, getDeadSweepStatus, reviveResurrectedFolios } from '../services/deadFoliosSweepService.js';
 import { runCobranzaMaintenance, getCobranzaCronStatus } from '../services/cobranzaCronService.js';
 
 const router = Router();
@@ -276,6 +276,21 @@ router.post('/sync/folios-muertos', async (req, res) => {
     sweepDeadFromLatestSnapshot(req.apiKey, { source: req.query.source || 'on-demand' })
         .catch(err => console.error('[dead sweep] error:', err));
     res.json({ success: true, started: true });
+});
+
+// POST /reports/sync/revive-folios — re-verifica los dead_folios contra Defontana
+// y des-marca los que volvieron a estar vivos (self-healing de falsos positivos).
+// Read de Defontana + write solo a nuestra Mongo. Espera el resultado (no fire-and-forget).
+router.post('/sync/revive-folios', async (req, res) => {
+    if (!req.apiKey) return res.status(401).json({ success: false, error: 'No autenticado' });
+    try {
+        const limit = req.query.limit ? Number(req.query.limit) : undefined;
+        const result = await reviveResurrectedFolios(req.apiKey, { source: req.query.source || 'on-demand', limit });
+        res.json({ success: true, ...result });
+    } catch (error) {
+        console.error('[reports/sync/revive-folios] error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 // POST /reports/cron/run-now — dispara el ciclo completo de mantenimiento on-demand.
