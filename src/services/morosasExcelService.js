@@ -566,15 +566,19 @@ export async function generateMorosasExcel({ includeAll = true, withFactoring = 
     wb.created = new Date();
     wb.properties.date1904 = false;
 
-    // 1) Morosa = morosas reales (diasMora > 0) + pendientes (no vencidas) con
-    // diasMora forzado a 0. Vence hoy también entra a Morosa con sus 0 días.
-    // Los pendientes pierden su signo negativo en días para no confundir al lector.
+    // 1) Morosa = morosas reales (diasMora > 0) + vence hoy + pendientes (no
+    // vencidas), para que la hoja principal sea la cuenta por cobrar COMPLETA.
+    // Las vence-hoy y pendientes se fuerzan a esMoroso=true para que pasen el
+    // filtro de categoría de la hoja (si no, classifyCategory las saca). Sus
+    // días se normalizan a >= 0 para no confundir al lector con signos negativos.
+    // (Las hojas "Vence hoy" y "Pendiente" siguen usando `rows` original, así que
+    // estos folios igual aparecen clasificados aparte.)
     const morosaCombined = rows
         .filter(r => r.esMoroso || r.venceHoy || (r.esFactura && !r.esCreditoCliente))
         .map(r => {
-            if (r.esMoroso || r.venceHoy) return r;
-            // Es Pendiente (no vencida) — copiar con diasMora normalizado a 0
-            return { ...r, diasMora: 0, esMoroso: true, bucket: bucketLabel(0) };
+            if (r.esMoroso) return r;
+            const dias = Math.max(0, r.diasMora ?? 0);
+            return { ...r, diasMora: dias, esMoroso: true, bucket: bucketLabel(dias) };
         });
     buildCategorySheet(wb, 'Morosa', morosaCombined, 'Morosa', clientsMap, folioMetaMap, factoringMap, columns);
 
